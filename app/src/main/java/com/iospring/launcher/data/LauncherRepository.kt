@@ -37,7 +37,7 @@ class LauncherRepository(private val context: Context) {
         val selfPkg = context.packageName
 
         val list = try {
-            launcherApps.getActivityList(null, Process.myUserHandle())
+            launcherApps?.getActivityList(null, Process.myUserHandle()).orEmpty()
         } catch (_: Exception) {
             emptyList()
         }
@@ -74,7 +74,7 @@ class LauncherRepository(private val context: Context) {
         val launcherApps = context.getSystemService(LauncherApps::class.java)
         val pm = context.packageManager
         val list = try {
-            launcherApps.getActivityList(packageName, Process.myUserHandle())
+            launcherApps?.getActivityList(packageName, Process.myUserHandle()).orEmpty()
         } catch (_: Exception) {
             emptyList()
         }

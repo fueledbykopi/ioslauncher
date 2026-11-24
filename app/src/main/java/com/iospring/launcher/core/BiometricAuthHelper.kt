@@ -35,6 +35,7 @@ object BiometricAuthHelper {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
+                val executor = ContextCompat.getMainExecutor(activity)
                 val builder = BiometricPrompt.Builder(activity)
                     .setTitle(title)
                     .setSubtitle(subtitle)
@@ -45,14 +46,17 @@ object BiometricAuthHelper {
                             BiometricManager.Authenticators.BIOMETRIC_WEAK or
                             BiometricManager.Authenticators.DEVICE_CREDENTIAL
                     )
-                } else {
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     @Suppress("DEPRECATION")
                     builder.setDeviceCredentialAllowed(true)
+                } else {
+                    builder.setNegativeButton("Cancel", executor) { _, _ ->
+                        onFailure("Authentication canceled")
+                    }
                 }
 
                 val prompt = builder.build()
                 val cancelSignal = CancellationSignal()
-                val executor = ContextCompat.getMainExecutor(activity)
 
                 prompt.authenticate(
                     cancelSignal,

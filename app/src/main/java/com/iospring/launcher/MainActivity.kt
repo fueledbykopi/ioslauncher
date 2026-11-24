@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var repository: LauncherRepository
     private lateinit var iconCache: IconCacheManager
-    private lateinit var launcherApps: LauncherApps
+    private var launcherApps: LauncherApps? = null
 
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -1025,12 +1025,23 @@ class MainActivity : ComponentActivity() {
         ).toBundle()
 
         try {
-            launcherApps.startMainActivity(
-                ComponentName(packageName, className),
-                Process.myUserHandle(),
-                null,
-                opts
-            )
+            val la = launcherApps
+            if (la != null) {
+                la.startMainActivity(
+                    ComponentName(packageName, className),
+                    Process.myUserHandle(),
+                    null,
+                    opts
+                )
+            } else {
+                val fallback = packageManager.getLaunchIntentForPackage(packageName)
+                if (fallback != null) {
+                    fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(fallback, opts)
+                } else {
+                    Toast.makeText(this, "Unable to launch app", Toast.LENGTH_SHORT).show()
+                }
+            }
         } catch (_: Exception) {
             val fallback = packageManager.getLaunchIntentForPackage(packageName)
             if (fallback != null) {

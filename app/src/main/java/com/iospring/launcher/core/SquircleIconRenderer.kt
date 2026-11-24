@@ -58,7 +58,7 @@ object SquircleMath {
 
 class IconCacheManager(private val context: Context) {
 
-    private val launcherApps = context.getSystemService(LauncherApps::class.java)
+    private val launcherApps: LauncherApps? = context.getSystemService(LauncherApps::class.java)
     private val maxCacheBytes: Int = run {
         val maxMem = (Runtime.getRuntime().maxMemory() / 1024L).toInt()
         (maxMem / 16).coerceIn(4 * 1024, 12 * 1024) // 4MB - 12MB cap for low RAM footprint
@@ -102,7 +102,7 @@ class IconCacheManager(private val context: Context) {
 
     private fun loadRawDrawable(packageName: String, className: String): Drawable? {
         return try {
-            val activities = launcherApps.getActivityList(packageName, Process.myUserHandle())
+            val activities = launcherApps?.getActivityList(packageName, Process.myUserHandle()).orEmpty()
             val match = activities.firstOrNull { it.componentName.className == className }
                 ?: activities.firstOrNull()
             match?.getBadgedIcon(0) ?: context.packageManager.getApplicationIcon(packageName)
@@ -184,11 +184,11 @@ class IconCacheManager(private val context: Context) {
         drawFallbackBackdrop(canvas, size, 0xFF2E2E32.toInt(), 0xFF171719.toInt())
         if (raw == null) return
 
-        if (raw is AdaptiveIconDrawable && raw.foreground != null) {
+        val adaptiveFg = (raw as? AdaptiveIconDrawable)?.foreground
+        if (adaptiveFg != null) {
             val bleed = (size * 0.13f).toInt()
-            val fg = raw.foreground
-            fg.setBounds(-bleed, -bleed, size + bleed, size + bleed)
-            fg.draw(canvas)
+            adaptiveFg.setBounds(-bleed, -bleed, size + bleed, size + bleed)
+            adaptiveFg.draw(canvas)
         } else {
             // Slightly dim overly bright white plates on legacy icons while preserving color vibrancy
             val pad = (size * 0.11f).toInt()
@@ -212,10 +212,11 @@ class IconCacheManager(private val context: Context) {
 
         val tmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val tmpCanvas = Canvas(tmp)
-        if (raw is AdaptiveIconDrawable && raw.foreground != null) {
+        val adaptiveFg = (raw as? AdaptiveIconDrawable)?.foreground
+        if (adaptiveFg != null) {
             val bleed = (size * 0.14f).toInt()
-            raw.foreground.setBounds(-bleed, -bleed, size + bleed, size + bleed)
-            raw.foreground.draw(tmpCanvas)
+            adaptiveFg.setBounds(-bleed, -bleed, size + bleed, size + bleed)
+            adaptiveFg.draw(tmpCanvas)
         } else {
             val pad = (size * 0.12f).toInt()
             raw.setBounds(pad, pad, size - pad, size - pad)

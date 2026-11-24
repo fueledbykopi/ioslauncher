@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
+import android.os.IBinder
 import android.view.View
 import android.view.Window
 import androidx.activity.ComponentActivity
@@ -149,15 +150,21 @@ object ColorOsCompat {
 
     /**
      * Applies subtle Android 11+ wallpaper zoom-out when opening Spotlight / Folder / Edit mode.
+     * Invoked via reflection because setWallpaperZoomOut is a @SystemApi on public SDK stubs.
      */
     fun setWallpaperZoom(activity: Activity, rootView: View, zoomFraction: Float) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         val token = rootView.windowToken ?: return
         try {
             val wm = WallpaperManager.getInstance(activity)
-            wm.setWallpaperZoomOut(token, zoomFraction.coerceIn(0f, 1f))
+            val method = WallpaperManager::class.java.getMethod(
+                "setWallpaperZoomOut",
+                IBinder::class.java,
+                Float::class.javaPrimitiveType
+            )
+            method.invoke(wm, token, zoomFraction.coerceIn(0f, 1f))
         } catch (_: Exception) {
-            // Ignore on devices without zoom support
+            // Ignore on devices/ROMs restricting wallpaper zoom
         }
     }
 
