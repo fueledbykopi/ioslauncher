@@ -12,18 +12,18 @@ import android.view.View
  */
 object IosDesign {
 
-    const val IOS_BLUE = 0xFF0A84FF.toInt()
-    const val IOS_RED = 0xFFFF3B30.toInt()
-    const val IOS_GREEN = 0xFF30D158.toInt()
-    const val IOS_ORANGE = 0xFFFF9F0A.toInt()
-    const val IOS_PURPLE = 0xFFBF5AF2.toInt()
-    const val IOS_PINK = 0xFFFF375F.toInt()
-    const val IOS_TEAL = 0xFF64D2FF.toInt()
-    const val IOS_DARK_SURFACE = 0xCC1C1C1E.toInt()
-    const val IOS_LIGHT_GLASS = 0x42FFFFFF
-    const val IOS_DOCK_GLASS = 0x44EAEAF0
-    const val IOS_DOCK_DARK_GLASS = 0x661C1C1E
-    const val IOS_GLASS_STROKE = 0x38FFFFFF
+    val IOS_BLUE: Int = 0xFF0A84FF.toInt()
+    val IOS_RED: Int = 0xFFFF3B30.toInt()
+    val IOS_GREEN: Int = 0xFF30D158.toInt()
+    val IOS_ORANGE: Int = 0xFFFF9F0A.toInt()
+    val IOS_PURPLE: Int = 0xFFBF5AF2.toInt()
+    val IOS_PINK: Int = 0xFFFF375F.toInt()
+    val IOS_TEAL: Int = 0xFF64D2FF.toInt()
+    val IOS_DARK_SURFACE: Int = 0xCC1C1C1E.toInt()
+    const val IOS_LIGHT_GLASS: Int = 0x42FFFFFF
+    const val IOS_DOCK_GLASS: Int = 0x44EAEAF0
+    const val IOS_DOCK_DARK_GLASS: Int = 0x661C1C1E
+    const val IOS_GLASS_STROKE: Int = 0x38FFFFFF
 
     val TINT_PRESETS = listOf(
         "iOS Blue" to IOS_BLUE,
