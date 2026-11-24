@@ -291,7 +291,7 @@ class MainActivity : ComponentActivity() {
             IosDesign.dpInt(this, 34f),
             Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
         ).apply {
-            bottomMargin = IosDesign.dpInt(this, 118f)
+            bottomMargin = IosDesign.dpInt(this@MainActivity, 118f)
         }
         workspaceBlurContainer.addView(searchPill, pillLp)
 
@@ -321,9 +321,9 @@ class MainActivity : ComponentActivity() {
             IosDesign.dpInt(this, 88f),
             Gravity.BOTTOM
         ).apply {
-            leftMargin = IosDesign.dpInt(this, 14f)
-            rightMargin = IosDesign.dpInt(this, 14f)
-            bottomMargin = IosDesign.dpInt(this, 22f)
+            leftMargin = IosDesign.dpInt(this@MainActivity, 14f)
+            rightMargin = IosDesign.dpInt(this@MainActivity, 14f)
+            bottomMargin = IosDesign.dpInt(this@MainActivity, 22f)
         }
         workspaceBlurContainer.addView(dockView, dockLp)
 
@@ -450,7 +450,7 @@ class MainActivity : ComponentActivity() {
 
         // Search pill sits right above Dock
         (searchPill.layoutParams as FrameLayout.LayoutParams).apply {
-            bottomMargin = dockBottomMargin + dockHeight + IosDesign.dpInt(this, 10f)
+            bottomMargin = dockBottomMargin + dockHeight + IosDesign.dpInt(this@MainActivity, 10f)
         }
         searchPill.requestLayout()
 
