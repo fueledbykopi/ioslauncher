@@ -15,7 +15,9 @@ object AppCategorizer {
         val lbl = label.lowercase()
 
         // 1. Explicit package heuristics for crisp accuracy
+        // Check explicit system utilities first so "Phone Manager" / "Clone Phone" don't match "phone" in SOCIAL
         when {
+            matchesAny(pkg, lbl, PRIORITY_UTILITY_KEYS) -> return AppCategory.UTILITIES
             matchesAny(pkg, lbl, SOCIAL_KEYS) -> return AppCategory.SOCIAL
             matchesAny(pkg, lbl, GAME_KEYS) -> return AppCategory.GAMES
             matchesAny(pkg, lbl, SHOPPING_KEYS) -> return AppCategory.SHOPPING
@@ -43,6 +45,11 @@ object AppCategorizer {
     private fun matchesAny(pkg: String, lbl: String, keys: List<String>): Boolean {
         return keys.any { key -> pkg.contains(key) || lbl.contains(key) }
     }
+
+    private val PRIORITY_UTILITY_KEYS = listOf(
+        "phonemanager", "phone manager", "clonephone", "clone phone",
+        "filemanager", "file manager", "settings", "calculator", "flashlight"
+    )
 
     private val SOCIAL_KEYS = listOf(
         "whatsapp", "instagram", "telegram", "facebook", "messenger", "twitter", "x.android",
