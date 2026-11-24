@@ -34,7 +34,7 @@
 ### 2. Kompatibilitas Gestur OPPO Android 15 (ColorOS 15)
 - **Edge-to-Edge & Safe `WindowInsets`:** Menggunakan `enableEdgeToEdge()` dengan penanganan presisi `statusBars`, `navigationBars`, `systemGestures`, dan `mandatorySystemGestures` sehingga Dock selalu aman di atas garis gestur (*gesture pill*).
 - **Zero Gesture Conflict:** Area tepi kiri/kanan (gestur *Back*) dan tepi paling bawah (gestur *Home* & *Recent Apps* ColorOS 15) tidak pernah dibajak oleh pager launcher.
-- **Optimal Launcher Lifecycle:** `MainActivity` dikonfigurasi dengan `singleTask`, `clearTaskOnLaunch="true"`, `stateNotNeeded="true"`, `resumeWhilePausing="true"`, `enableOnBackInvokedCallback="true"`, dan `onNewIntent()` yang menutup overlay lalu kembali ke halaman utama dengan pegas (*spring*) halus.
+- **Optimal Launcher Lifecycle:** `MainActivity` dikonfigurasi dengan `singleTask`, `clearTaskOnLaunch="true"`, `stateNotNeeded="true"`, `enableOnBackInvokedCallback="true"`, dan `onNewIntent()` yang menutup overlay lalu kembali ke halaman utama dengan pegas (*spring*) halus.
 - **Wallpaper Sistem Tajam & Parallax:** Menggunakan `windowShowWallpaper="true"` + `WallpaperManager.setWallpaperOffsets()` untuk wallpaper asli ColorOS 15 dengan efek parallax horizontal halus.
 
 ### 3. Ultra Ringan (Low RAM & Baterai)
