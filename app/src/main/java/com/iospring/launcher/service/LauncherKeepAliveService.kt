@@ -36,11 +36,18 @@ class LauncherKeepAliveService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
+            serviceRunning = true
         } catch (_: Exception) {
+            serviceRunning = false
             stopSelf()
             return START_NOT_STICKY
         }
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        serviceRunning = false
+        super.onDestroy()
     }
 
     private fun ensureNotificationChannel() {
@@ -85,13 +92,19 @@ class LauncherKeepAliveService : Service() {
         private const val CHANNEL_ID = "iospring_keep_alive"
         private const val NOTIFICATION_ID = 1801
 
+        @Volatile
+        private var serviceRunning: Boolean = false
+
         fun syncState(context: Context, enabled: Boolean) {
+            if (enabled && serviceRunning) return
+            if (!enabled && !serviceRunning) return
             val appCtx = context.applicationContext
             val intent = Intent(appCtx, LauncherKeepAliveService::class.java)
             try {
                 if (enabled) {
                     ContextCompat.startForegroundService(appCtx, intent)
                 } else {
+                    serviceRunning = false
                     appCtx.stopService(intent)
                 }
             } catch (_: Exception) {

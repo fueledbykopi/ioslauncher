@@ -20,6 +20,8 @@ import android.widget.TextView
 import com.iospring.launcher.core.IconCacheManager
 import com.iospring.launcher.core.SpotlightEngine
 import com.iospring.launcher.model.AppEntry
+import com.iospring.launcher.model.GlassThemeStyle
+import com.iospring.launcher.model.IconThemeStyle
 
 /**
  * Full-screen iOS 18 Spotlight Search Overlay.
@@ -36,8 +38,11 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
     private var hiddenPackages: Set<String> = emptySet()
     private var usageScores: Map<String, Long> = emptyMap()
     private var iconCache: IconCacheManager? = null
+    private var glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
+    private var iconStyle: IconThemeStyle = IconThemeStyle.LIGHT
     private var isDismissing: Boolean = false
     private var animToken: Int = 0
+    private lateinit var inputPill: LinearLayout
 
     private val showKeyboardRunnable = Runnable {
         if (visibility == VISIBLE && !isDismissing) {
@@ -87,15 +92,10 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        val inputPill = LinearLayout(context).apply {
+        inputPill = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = IosDesign.createGlassDrawable(
-                context = context,
-                cornerRadiusDp = 16f,
-                fillColor = 0x38FFFFFF,
-                strokeColor = 0x34FFFFFF
-            )
+            background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
             setPadding(IosDesign.dpInt(context, 14f), IosDesign.dpInt(context, 8f), IosDesign.dpInt(context, 10f), IosDesign.dpInt(context, 8f))
         }
 
@@ -169,6 +169,19 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
     fun updateTopInset(statusBarTop: Int) {
         val padH = IosDesign.dpInt(context, 18f)
         contentColumn.setPadding(padH, statusBarTop + IosDesign.dpInt(context, 14f), padH, IosDesign.dpInt(context, 24f))
+    }
+
+    fun applyGlassTheme(glass: GlassThemeStyle, icon: IconThemeStyle) {
+        glassStyle = glass
+        iconStyle = icon
+        inputPill.background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
+        setBackgroundColor(
+            when (glassStyle) {
+                GlassThemeStyle.LIQUID_GLASS -> 0x8A0C0E14.toInt()
+                GlassThemeStyle.FROSTED_BLUR -> 0xB80E0E12.toInt()
+                GlassThemeStyle.OBSIDIAN_GLASS -> 0xCC07070A.toInt()
+            }
+        )
     }
 
     fun open(
@@ -267,7 +280,7 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
         if (res.mathResult != null && res.mathExpression != null) {
             val mathCard = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                background = IosDesign.createGlassDrawable(context, 18f, 0x38FFFFFF, 0x30FFFFFF)
+                background = IosDesign.createThemeSurface(context, 20f, glassStyle, iconStyle)
                 val p = IosDesign.dpInt(context, 16f)
                 setPadding(p, p, p, p)
             }
@@ -299,7 +312,7 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
             resultsContainer.addView(createSectionHeader(sectionTitle))
             val card = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                background = IosDesign.createGlassDrawable(context, 20f, 0x2CFFFFFF, 0x28FFFFFF)
+                background = IosDesign.createThemeSurface(context, 22f, glassStyle, iconStyle)
                 val p = IosDesign.dpInt(context, 10f)
                 setPadding(p, p, p, p)
             }
@@ -337,7 +350,7 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
                 setTextColor(Color.WHITE)
                 textSize = 15f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                background = IosDesign.createGlassDrawable(context, 16f, 0x36FFFFFF, 0x30FFFFFF)
+                background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
                 val p = IosDesign.dpInt(context, 16f)
                 setPadding(p, IosDesign.dpInt(context, 14f), p, IosDesign.dpInt(context, 14f))
                 setOnClickListener {

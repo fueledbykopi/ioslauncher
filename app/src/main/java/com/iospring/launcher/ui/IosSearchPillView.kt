@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.View
+import com.iospring.launcher.model.GlassThemeStyle
 
 /**
  * Signature iOS 16-18 floating "Search" frosted capsule above the Dock.
@@ -32,6 +33,35 @@ class IosSearchPillView(context: Context) : View(context) {
             field = value
             invalidate()
         }
+
+    var glassThemeStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
+        set(value) {
+            if (field != value) {
+                field = value
+                applyThemeColors()
+                invalidate()
+            }
+        }
+
+    private fun applyThemeColors() {
+        when (glassThemeStyle) {
+            GlassThemeStyle.LIQUID_GLASS -> {
+                bgPaint.color = 0x32FFFFFF
+                strokePaint.color = 0x98FFFFFF.toInt()
+                strokePaint.strokeWidth = IosDesign.dp(context, 1.05f)
+            }
+            GlassThemeStyle.FROSTED_BLUR -> {
+                bgPaint.color = 0x54F2F2F8
+                strokePaint.color = 0x54FFFFFF
+                strokePaint.strokeWidth = IosDesign.dp(context, 0.85f)
+            }
+            GlassThemeStyle.OBSIDIAN_GLASS -> {
+                bgPaint.color = 0x7A18181C
+                strokePaint.color = 0x48FFFFFF
+                strokePaint.strokeWidth = IosDesign.dp(context, 0.95f)
+            }
+        }
+    }
 
     private var showingDots: Boolean = false
     private val pillRect = RectF()
@@ -74,6 +104,7 @@ class IosSearchPillView(context: Context) : View(context) {
     init {
         isClickable = true
         isFocusable = true
+        applyThemeColors()
     }
 
     fun showPageDotsTemporarily(activePage: Int) {

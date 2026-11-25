@@ -21,6 +21,7 @@ import androidx.activity.ComponentActivity
 import com.iospring.launcher.core.BiometricAuthHelper
 import com.iospring.launcher.core.ColorOsCompat
 import com.iospring.launcher.data.LauncherRepository
+import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.IconSizeMode
 import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.model.LauncherPreferences
@@ -115,9 +116,17 @@ class SettingsActivity : ComponentActivity() {
         })
         rootColumn.addView(defaultCard)
 
-        // 2. iOS 18 Icon Appearance
-        rootColumn.addView(createSectionHeader("IOS 18 ICON APPEARANCE"))
+        // 2. Apple iOS Liquid Glass & Icon Appearance
+        rootColumn.addView(createSectionHeader("APPLE IOS GLASS & ICON APPEARANCE"))
         val iconCard = createGroupCard()
+        iconCard.addView(createActionRow(
+            title = "Glass Theme",
+            subtitle = "${prefs.glassThemeStyle.label} — ${prefs.glassThemeStyle.subtitle}",
+            accentColor = IosDesign.IOS_BLUE
+        ) {
+            showGlassThemePicker()
+        })
+        iconCard.addView(createDivider())
         iconCard.addView(createActionRow(
             title = "Icon Style",
             subtitle = prefs.iconThemeStyle.label,
@@ -271,6 +280,19 @@ class SettingsActivity : ComponentActivity() {
     private fun updatePrefs(updated: LauncherPreferences) {
         prefs = updated
         repository.savePreferences(updated)
+    }
+
+    private fun showGlassThemePicker() {
+        val styles = GlassThemeStyle.entries
+        val names = styles.map { "${it.label}\n${it.subtitle}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Apple Glass Theme")
+            .setSingleChoiceItems(names, prefs.glassThemeStyle.ordinal) { dlg, which ->
+                updatePrefs(prefs.copy(glassThemeStyle = styles[which]))
+                dlg.dismiss()
+                renderSettings()
+            }
+            .show()
     }
 
     private fun showIconStylePicker() {

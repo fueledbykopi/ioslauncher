@@ -7,6 +7,7 @@ import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.view.View
 import android.view.Window
 import androidx.activity.ComponentActivity
@@ -41,6 +42,7 @@ object ColorOsCompat {
 
     private var lastWallpaperSteps: Int = -1
     private var lastWallpaperProgress: Float = -1f
+    private var lastStatusBarSyncMs: Long = 0L
 
     fun configureEdgeToEdge(activity: ComponentActivity) {
         activity.enableEdgeToEdge(
@@ -56,7 +58,12 @@ object ColorOsCompat {
         syncStatusBarAppearanceWithWallpaper(activity)
     }
 
-    fun syncStatusBarAppearanceWithWallpaper(activity: Activity) {
+    fun syncStatusBarAppearanceWithWallpaper(activity: Activity, force: Boolean = false) {
+        val now = SystemClock.elapsedRealtime()
+        if (!force && lastStatusBarSyncMs != 0L && now - lastStatusBarSyncMs < 30_000L) {
+            return
+        }
+        lastStatusBarSyncMs = now
         val controller = WindowInsetsControllerCompat(activity.window, activity.window.decorView)
         val isLightWallpaper = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             try {

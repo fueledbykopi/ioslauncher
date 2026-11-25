@@ -23,6 +23,8 @@ import android.widget.TextView
 import com.iospring.launcher.core.IconCacheManager
 import com.iospring.launcher.model.AppCategory
 import com.iospring.launcher.model.AppEntry
+import com.iospring.launcher.model.GlassThemeStyle
+import com.iospring.launcher.model.IconThemeStyle
 
 /**
  * Rightmost iOS 18 App Library Page.
@@ -41,9 +43,12 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
     private var hiddenPackages: Set<String> = emptySet()
     private var usageScores: Map<String, Long> = emptyMap()
     private var iconCache: IconCacheManager? = null
+    private var glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
+    private var iconStyle: IconThemeStyle = IconThemeStyle.LIGHT
 
     private var isListMode: Boolean = false
     private var alphaListDirty: Boolean = true
+    private lateinit var searchBox: FrameLayout
 
     private val mainColumn = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -99,8 +104,8 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val searchBox = FrameLayout(context).apply {
-            background = IosDesign.createGlassDrawable(context, 16f, 0x36FFFFFF, 0x32FFFFFF)
+        searchBox = FrameLayout(context).apply {
+            background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
             val hp = IosDesign.dpInt(context, 14f)
             setPadding(hp, 0, hp, 0)
             addView(searchEdit, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -180,12 +185,18 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         apps: List<AppEntry>,
         hidden: Set<String>,
         usage: Map<String, Long>,
-        cache: IconCacheManager
+        cache: IconCacheManager,
+        glassTheme: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS,
+        iconTheme: IconThemeStyle = IconThemeStyle.LIGHT
     ) {
         allApps = apps
         hiddenPackages = hidden
         usageScores = usage
         iconCache = cache
+        glassStyle = glassTheme
+        iconStyle = iconTheme
+        searchBox.background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
+        toggleModeBtn.background = IosDesign.createThemeSurface(context, 999f, glassStyle, iconStyle)
         alphaListDirty = true
         renderCategoryFolders()
         if (isListMode) {
@@ -295,7 +306,7 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         val box = GridLayout(context).apply {
             columnCount = 2
             rowCount = 2
-            background = IosDesign.createFrostedSurface(context, 28f, 0x48F5F5FA, 0x32DCDCE6, 0x4CFFFFFF)
+            background = IosDesign.createThemeSurface(context, 28f, glassStyle, iconStyle)
             val p = IosDesign.dpInt(context, 12f)
             setPadding(p, p, p, p)
         }

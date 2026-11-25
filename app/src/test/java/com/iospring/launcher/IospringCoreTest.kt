@@ -13,6 +13,7 @@ import com.iospring.launcher.data.GridOccupancy
 import com.iospring.launcher.model.AppCategory
 import com.iospring.launcher.model.AppEntry
 import com.iospring.launcher.model.BuiltInWidgetType
+import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.HomeItem
 import com.iospring.launcher.model.LauncherPreferences
 import org.junit.Assert.assertEquals
@@ -197,5 +198,6 @@ class IospringCoreTest {
         assertTrue(defaults.showAppLabels)
         assertTrue(defaults.iosIconPackEnabled)
         assertTrue(defaults.keepInRamEnabled)
+        assertEquals(GlassThemeStyle.LIQUID_GLASS, defaults.glassThemeStyle)
     }
 }

@@ -10,6 +10,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.iospring.launcher.core.IconCacheManager
 import com.iospring.launcher.model.DockSlot
+import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.service.BadgeStore
 
@@ -34,14 +35,11 @@ class IosDockView(context: Context) : FrameLayout(context) {
     private var showBadges: Boolean = true
 
     init {
-        val dockRadius = 31f
-        backdropLayer.background = IosDesign.createFrostedSurface(
+        backdropLayer.background = IosDesign.createThemeSurface(
             context = context,
-            cornerRadiusDp = dockRadius,
-            topFillColor = 0x58F2F2F8,
-            bottomFillColor = 0x3AD6D6E0,
-            strokeColor = 0x58FFFFFF,
-            strokeWidthDp = 0.9f
+            cornerRadiusDp = 32f,
+            glassStyle = GlassThemeStyle.LIQUID_GLASS,
+            iconStyle = IconThemeStyle.LIGHT
         )
         addView(backdropLayer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
@@ -51,22 +49,21 @@ class IosDockView(context: Context) : FrameLayout(context) {
         addView(iconsRow, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
-    fun applyGlassStyle(style: IconThemeStyle, blurEnabled: Boolean) {
-        val (topFill, bottomFill, stroke) = when (style) {
-            IconThemeStyle.LIGHT -> Triple(0x58F2F2F8, 0x3AD6D6E0, 0x58FFFFFF)
-            IconThemeStyle.DARK, IconThemeStyle.TINTED -> Triple(0x782C2C30, 0x5C161618, 0x36FFFFFF)
-        }
-        backdropLayer.background = IosDesign.createFrostedSurface(
+    fun applyGlassStyle(
+        style: IconThemeStyle,
+        blurEnabled: Boolean,
+        glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
+    ) {
+        backdropLayer.background = IosDesign.createThemeSurface(
             context = context,
-            cornerRadiusDp = 31f,
-            topFillColor = topFill,
-            bottomFillColor = bottomFill,
-            strokeColor = stroke,
-            strokeWidthDp = 0.9f
+            cornerRadiusDp = 32f,
+            glassStyle = glassStyle,
+            iconStyle = style
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val radius = IosDesign.blurRadiusFor(glassStyle, strong = false)
             backdropLayer.setRenderEffect(
-                if (blurEnabled) RenderEffect.createBlurEffect(20f, 20f, Shader.TileMode.CLAMP) else null
+                if (blurEnabled) RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP) else null
             )
         }
     }

@@ -20,6 +20,12 @@ enum class IconThemeStyle(val label: String) {
     TINTED("Tinted")
 }
 
+enum class GlassThemeStyle(val label: String, val subtitle: String) {
+    LIQUID_GLASS("Liquid Glass (Latest iOS)", "Crystal-clear refractive optical glass & specular rim"),
+    FROSTED_BLUR("Frosted Blur (iOS 18)", "Rich milky frosted glass with smooth backdrop blur"),
+    OBSIDIAN_GLASS("Obsidian Glass (Dark)", "Deep smoked dark glass with titanium sheen")
+}
+
 enum class IconSizeMode(val label: String) {
     STANDARD("Small (Labels)"),
     LARGE("Large (No Labels)")
@@ -120,6 +126,7 @@ data class LauncherPreferences(
     val gridCols: Int = 4,
     val gridRows: Int = 6,
     val iconThemeStyle: IconThemeStyle = IconThemeStyle.LIGHT,
+    val glassThemeStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS,
     val iconTintColor: Int = 0xFF0A84FF.toInt(),
     val iconSizeMode: IconSizeMode = IconSizeMode.STANDARD,
     val showAppLabels: Boolean = true,

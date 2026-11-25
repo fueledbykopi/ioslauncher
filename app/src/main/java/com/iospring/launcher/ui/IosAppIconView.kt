@@ -73,6 +73,7 @@ class IosAppIconView(context: Context) : View(context) {
         }
 
     var darkGlassFolder: Boolean = false
+    var liquidGlassFolder: Boolean = true
 
     var onRemoveBadgeClick: (() -> Unit)? = null
 
@@ -245,7 +246,13 @@ class IosAppIconView(context: Context) : View(context) {
         }
         val save = canvas.save()
         canvas.translate(rect.left, rect.top)
-        folderBgPaint.color = if (darkGlassFolder) 0x802C2C2E.toInt() else 0x58F2F2F7
+        folderBgPaint.color = when {
+            darkGlassFolder -> 0x7A1E1E24.toInt()
+            liquidGlassFolder -> 0x3CFFFFFF
+            else -> 0x5CF2F2F7
+        }
+        folderBorderPaint.color = if (liquidGlassFolder) 0x8EFFFFFF.toInt() else 0x52FFFFFF
+        folderBorderPaint.strokeWidth = IosDesign.dp(context, if (liquidGlassFolder) 1.25f else 1.0f)
         folderClipPath?.let { path ->
             canvas.drawPath(path, folderBgPaint)
             canvas.save()

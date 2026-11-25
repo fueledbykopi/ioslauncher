@@ -18,6 +18,7 @@ import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.Drawable
 import android.os.Process
 import android.util.LruCache
+import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.IconThemeStyle
 import kotlin.math.PI
 import kotlin.math.abs
@@ -77,14 +78,21 @@ class IconCacheManager(private val context: Context) {
     )
 
     private var themeStyle: IconThemeStyle = IconThemeStyle.LIGHT
+    private var glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
     private var tintColor: Int = Color.parseColor("#0A84FF")
     private var iosIconPackEnabled: Boolean = true
 
-    fun updateTheme(style: IconThemeStyle, tint: Int, useIconPack: Boolean = iosIconPackEnabled) {
-        if (themeStyle != style || tintColor != tint || iosIconPackEnabled != useIconPack) {
+    fun updateTheme(
+        style: IconThemeStyle,
+        tint: Int,
+        useIconPack: Boolean = iosIconPackEnabled,
+        glass: GlassThemeStyle = glassStyle
+    ) {
+        if (themeStyle != style || tintColor != tint || iosIconPackEnabled != useIconPack || glassStyle != glass) {
             themeStyle = style
             tintColor = tint
             iosIconPackEnabled = useIconPack
+            glassStyle = glass
             cache.evictAll()
         }
     }
@@ -104,7 +112,7 @@ class IconCacheManager(private val context: Context) {
 
     fun getIcon(packageName: String, className: String, label: String = ""): Bitmap {
         val packFlag = if (iosIconPackEnabled) 1 else 0
-        val key = "$packageName/$className|${themeStyle.ordinal}|$tintColor|$packFlag"
+        val key = "$packageName/$className|${themeStyle.ordinal}|${glassStyle.ordinal}|$tintColor|$packFlag"
         cache.get(key)?.let { return it }
 
         val rendered = if (iosIconPackEnabled) {
@@ -169,17 +177,46 @@ class IconCacheManager(private val context: Context) {
     }
 
     private fun drawSpecularRim(canvas: Canvas, size: Int) {
-        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = (1.15f * density).coerceAtLeast(1f)
-            shader = LinearGradient(
-                0f, 0f, 0f, size.toFloat(),
-                if (themeStyle == IconThemeStyle.LIGHT) 0x4CFFFFFF else 0x36FFFFFF,
-                0x16000000,
-                Shader.TileMode.CLAMP
-            )
+        val s = size.toFloat()
+        if (glassStyle == GlassThemeStyle.LIQUID_GLASS) {
+            // Latest Apple Liquid Glass top curved optical sheen + crisp directional specular rim
+            val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(
+                    0f, 0f, 0f, s * 0.44f,
+                    if (themeStyle == IconThemeStyle.LIGHT) 0x3AFFFFFF else 0x26FFFFFF,
+                    0x00FFFFFF,
+                    Shader.TileMode.CLAMP
+                )
+            }
+            canvas.drawRect(0f, 0f, s, s * 0.44f, sheenPaint)
+            val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = (1.5f * density).coerceAtLeast(1.5f)
+                shader = LinearGradient(
+                    0f, 0f, s * 0.3f, s,
+                    intArrayOf(
+                        if (themeStyle == IconThemeStyle.LIGHT) 0x9EFFFFFF.toInt() else 0x6EFFFFFF,
+                        0x24FFFFFF,
+                        if (themeStyle == IconThemeStyle.LIGHT) 0x5AFFFFFF else 0x38FFFFFF
+                    ),
+                    floatArrayOf(0f, 0.5f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+            }
+            canvas.drawPath(maskPath, rimPaint)
+        } else {
+            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = (1.15f * density).coerceAtLeast(1f)
+                shader = LinearGradient(
+                    0f, 0f, 0f, s,
+                    if (themeStyle == IconThemeStyle.LIGHT) 0x4CFFFFFF else 0x36FFFFFF,
+                    0x16000000,
+                    Shader.TileMode.CLAMP
+                )
+            }
+            canvas.drawPath(maskPath, borderPaint)
         }
-        canvas.drawPath(maskPath, borderPaint)
     }
 
     private fun drawLightIcon(canvas: Canvas, raw: Drawable?, size: Int) {

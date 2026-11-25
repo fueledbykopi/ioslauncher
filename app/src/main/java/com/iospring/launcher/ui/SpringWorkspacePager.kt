@@ -76,6 +76,8 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
 
     val pageCount: Int get() = childCount
     val activePageIndex: Int get() = currentPage
+    val hasStaleTouchState: Boolean
+        get() = mode != DragMode.NONE || isDraggingItem || gestureIgnoredBySystemZone || activePointerId != MotionEvent.INVALID_POINTER_ID
 
     init {
         clipChildren = false
@@ -124,7 +126,10 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
         isDraggingItem = false
         if (snapToCurrentPage && width > 0 && childCount > 0) {
             currentPage = currentPage.coerceIn(0, childCount - 1)
-            spring.snapTo(currentPage * width.toFloat())
+            val targetX = currentPage * width.toFloat()
+            if (!currentScrollX.isFinite() || abs(currentScrollX - targetX) > 0.5f) {
+                spring.snapTo(targetX)
+            }
         }
     }
 

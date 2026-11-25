@@ -9,6 +9,7 @@ import com.iospring.launcher.core.AppCategorizer
 import com.iospring.launcher.model.AppEntry
 import com.iospring.launcher.model.BuiltInWidgetType
 import com.iospring.launcher.model.DockSlot
+import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.HomeItem
 import com.iospring.launcher.model.IconSizeMode
 import com.iospring.launcher.model.IconThemeStyle
@@ -100,6 +101,7 @@ class LauncherRepository(private val context: Context) {
 
     fun loadPreferences(): LauncherPreferences {
         val styleOrd = prefs.getInt(KEY_ICON_STYLE, IconThemeStyle.LIGHT.ordinal)
+        val glassOrd = prefs.getInt(KEY_GLASS_STYLE, GlassThemeStyle.LIQUID_GLASS.ordinal)
         val sizeOrd = prefs.getInt(KEY_ICON_SIZE, IconSizeMode.STANDARD.ordinal)
         val hiddenSet = prefs.getStringSet(KEY_HIDDEN_PACKAGES, emptySet())?.toSet() ?: emptySet()
         val lockedSet = prefs.getStringSet(KEY_LOCKED_PACKAGES, emptySet())?.toSet() ?: emptySet()
@@ -108,6 +110,7 @@ class LauncherRepository(private val context: Context) {
             gridCols = prefs.getInt(KEY_GRID_COLS, 4).coerceIn(4, 5),
             gridRows = prefs.getInt(KEY_GRID_ROWS, 6).coerceIn(5, 7),
             iconThemeStyle = IconThemeStyle.entries.getOrElse(styleOrd) { IconThemeStyle.LIGHT },
+            glassThemeStyle = GlassThemeStyle.entries.getOrElse(glassOrd) { GlassThemeStyle.LIQUID_GLASS },
             iconTintColor = prefs.getInt(KEY_ICON_TINT, Color.parseColor("#0A84FF")),
             iconSizeMode = IconSizeMode.entries.getOrElse(sizeOrd) { IconSizeMode.STANDARD },
             showAppLabels = prefs.getBoolean(KEY_SHOW_APP_LABELS, true),
@@ -131,6 +134,7 @@ class LauncherRepository(private val context: Context) {
             .putInt(KEY_GRID_COLS, p.gridCols)
             .putInt(KEY_GRID_ROWS, p.gridRows)
             .putInt(KEY_ICON_STYLE, p.iconThemeStyle.ordinal)
+            .putInt(KEY_GLASS_STYLE, p.glassThemeStyle.ordinal)
             .putInt(KEY_ICON_TINT, p.iconTintColor)
             .putInt(KEY_ICON_SIZE, p.iconSizeMode.ordinal)
             .putBoolean(KEY_SHOW_APP_LABELS, p.showAppLabels)
@@ -343,6 +347,7 @@ class LauncherRepository(private val context: Context) {
         private const val KEY_GRID_COLS = "grid_cols"
         private const val KEY_GRID_ROWS = "grid_rows"
         private const val KEY_ICON_STYLE = "icon_style"
+        private const val KEY_GLASS_STYLE = "glass_style"
         private const val KEY_ICON_TINT = "icon_tint"
         private const val KEY_ICON_SIZE = "icon_size"
         private const val KEY_SHOW_APP_LABELS = "show_app_labels"

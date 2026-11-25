@@ -17,7 +17,9 @@ import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import com.iospring.launcher.core.IconCacheManager
+import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.HomeItem
+import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.service.BadgeStore
 
 /**
@@ -74,13 +76,12 @@ class IosFolderOverlayView(context: Context) : FrameLayout(context) {
         contentColumn.addView(titleEdit, titleLp)
 
         val cardSize = IosDesign.dpInt(context, 312f)
-        cardContainer.background = IosDesign.createFrostedSurface(
+        cardContainer.background = IosDesign.createThemeSurface(
             context = context,
             cornerRadiusDp = 36f,
-            topFillColor = 0x62F5F5FA,
-            bottomFillColor = 0x46DCDCE6,
-            strokeColor = 0x58FFFFFF,
-            strokeWidthDp = 1f
+            glassStyle = GlassThemeStyle.LIQUID_GLASS,
+            iconStyle = IconThemeStyle.LIGHT,
+            strongSurface = true
         )
         val pad = IosDesign.dpInt(context, 16f)
         cardContainer.setPadding(pad, pad, pad, pad)
@@ -109,6 +110,16 @@ class IosFolderOverlayView(context: Context) : FrameLayout(context) {
                 }
             }
         })
+    }
+
+    fun applyGlassTheme(glassStyle: GlassThemeStyle, iconStyle: IconThemeStyle) {
+        cardContainer.background = IosDesign.createThemeSurface(
+            context = context,
+            cornerRadiusDp = 36f,
+            glassStyle = glassStyle,
+            iconStyle = iconStyle,
+            strongSurface = true
+        )
     }
 
     fun openFolder(

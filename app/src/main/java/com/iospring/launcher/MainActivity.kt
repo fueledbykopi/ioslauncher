@@ -20,6 +20,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -37,6 +38,7 @@ import com.iospring.launcher.data.LauncherRepository
 import com.iospring.launcher.model.AppEntry
 import com.iospring.launcher.model.BuiltInWidgetType
 import com.iospring.launcher.model.DockSlot
+import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.HomeItem
 import com.iospring.launcher.model.IconSizeMode
 import com.iospring.launcher.model.IconThemeStyle
@@ -91,10 +93,14 @@ class MainActivity : ComponentActivity() {
     private var isJiggleMode: Boolean = false
     private var currentHomePageOffset: Int = 0 // 1 if Today View is enabled, else 0
     private var isActivityResumed: Boolean = false
+    private var returningFromSettings: Boolean = false
+    private var wasStoppedInBackground: Boolean = false
     private var pendingWorkspaceRebuild: Boolean = false
     private var overlayBlurActive: Boolean = false
     private val pendingPackageUpdates = LinkedHashMap<String, Boolean>()
     private var packageUpdateJob: Job? = null
+    private var pendingResumeHousekeeping: Runnable? = null
+    private val homeSettleInterpolator = DecelerateInterpolator(2.2f)
 
     // Root & Layered Views
     private lateinit var rootFrame: FrameLayout
@@ -132,6 +138,7 @@ class MainActivity : ComponentActivity() {
 
     private val liveTickReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            if (isInitialStickyBroadcast) return
             refreshVisibleWidgets()
         }
     }
@@ -148,9 +155,10 @@ class MainActivity : ComponentActivity() {
         dragTouchSlop = ViewConfiguration.get(this).scaledTouchSlop
 
         prefs = repository.loadPreferences()
-        iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled)
+        iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled, prefs.glassThemeStyle)
 
         buildViewHierarchy()
+        applyGlassThemeToChrome()
         setContentView(rootFrame)
 
         // 2. Observe system bars & ColorOS 15 gesture safe zones
@@ -186,51 +194,88 @@ class MainActivity : ComponentActivity() {
         handleBackOrHome(isHomeGesture = true)
     }
 
+    override fun onStart() {
+        super.onStart()
+        registerLiveTickReceiver()
+    }
+
     override fun onResume() {
         super.onResume()
         isActivityResumed = true
-        ColorOsCompat.syncStatusBarAppearanceWithWallpaper(this)
 
-        // Ensure no interrupted overlay dismiss or stale drag state can ever block swipes
+        // Fast zero-IPC first-frame path: ensure no stuck overlay/drag can block Home or Recents
         folderOverlay.finalizePendingDismiss()
         spotlightOverlay.finalizePendingDismiss()
         contextMenuOverlay.finalizePendingDismiss()
         if (!folderOverlay.isOpen && !spotlightOverlay.isOpen && !contextMenuOverlay.isOpen) {
             setOverlayBlur(false)
         }
-        if (dragItem == null) {
+        if (dragItem == null && pager.hasStaleTouchState) {
             pager.resetTouchState(snapToCurrentPage = true)
         }
 
-        // Reload preferences in case user changed theme/grid/hidden apps in SettingsActivity
-        val latestPrefs = repository.loadPreferences()
-        if (latestPrefs != prefs) {
-            val themeChanged = latestPrefs.iconThemeStyle != prefs.iconThemeStyle ||
-                latestPrefs.iconTintColor != prefs.iconTintColor ||
-                latestPrefs.iosIconPackEnabled != prefs.iosIconPackEnabled
-            prefs = latestPrefs
-            if (themeChanged) {
-                iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled)
+        // Smooth GPU-only iOS spring settle when returning from another app (zero delay on Recents peek)
+        if (wasStoppedInBackground) {
+            wasStoppedInBackground = false
+            workspaceBlurContainer.animate().cancel()
+            workspaceBlurContainer.scaleX = 1.03f
+            workspaceBlurContainer.scaleY = 1.03f
+            workspaceBlurContainer.animate()
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(175L)
+                .setInterpolator(homeSettleInterpolator)
+                .start()
+        }
+
+        // Only reload SharedPreferences when actually returning from SettingsActivity
+        if (returningFromSettings) {
+            returningFromSettings = false
+            val latestPrefs = repository.loadPreferences()
+            if (latestPrefs != prefs) {
+                val themeChanged = latestPrefs.iconThemeStyle != prefs.iconThemeStyle ||
+                    latestPrefs.iconTintColor != prefs.iconTintColor ||
+                    latestPrefs.iosIconPackEnabled != prefs.iosIconPackEnabled ||
+                    latestPrefs.glassThemeStyle != prefs.glassThemeStyle
+                prefs = latestPrefs
+                if (themeChanged) {
+                    iconCache.updateTheme(
+                        prefs.iconThemeStyle,
+                        prefs.iconTintColor,
+                        prefs.iosIconPackEnabled,
+                        prefs.glassThemeStyle
+                    )
+                }
+                pager.colorOsSafeZoneEnabled = prefs.colorOsGestureSafeZone
+                pager.swipeDownSpotlightEnabled = prefs.swipeDownSpotlight
+                applyGlassThemeToChrome()
+                repository.reconcileWithInstalledApps(workspace, installedApps, prefs)
+                pendingWorkspaceRebuild = false
+                rebuildWorkspacePages(preserveCurrentPage = true)
             }
-            pager.colorOsSafeZoneEnabled = prefs.colorOsGestureSafeZone
-            pager.swipeDownSpotlightEnabled = prefs.swipeDownSpotlight
-            repository.reconcileWithInstalledApps(workspace, installedApps, prefs)
-            pendingWorkspaceRebuild = false
-            rebuildWorkspacePages(preserveCurrentPage = true)
         } else if (pendingWorkspaceRebuild) {
             pendingWorkspaceRebuild = false
             rebuildWorkspacePages(preserveCurrentPage = true)
         }
 
-        LauncherKeepAliveService.syncState(this, prefs.keepInRamEnabled)
-        registerLiveTickReceiver()
-        refreshVisibleWidgets()
-        refreshBadgesInPlace()
+        // Defer non-critical IPC & widget/badge refreshes until after the first Home frame renders
+        pendingResumeHousekeeping?.let { rootFrame.removeCallbacks(it) }
+        val task = Runnable {
+            pendingResumeHousekeeping = null
+            if (!isActivityResumed) return@Runnable
+            ColorOsCompat.syncStatusBarAppearanceWithWallpaper(this@MainActivity)
+            LauncherKeepAliveService.syncState(this@MainActivity, prefs.keepInRamEnabled)
+            refreshVisibleWidgets()
+            refreshBadgesInPlace()
+        }
+        pendingResumeHousekeeping = task
+        rootFrame.postOnAnimation(task)
     }
 
     override fun onPause() {
         isActivityResumed = false
-        unregisterLiveTickReceiver()
+        pendingResumeHousekeeping?.let { rootFrame.removeCallbacks(it) }
+        pendingResumeHousekeeping = null
         if (isJiggleMode) {
             exitJiggleMode()
         }
@@ -238,8 +283,16 @@ class MainActivity : ComponentActivity() {
         spotlightOverlay.finalizePendingDismiss()
         contextMenuOverlay.finalizePendingDismiss()
         appLibraryPage?.clearSearchFocus()
-        pager.resetTouchState(snapToCurrentPage = true)
+        if (pager.hasStaleTouchState) {
+            pager.resetTouchState(snapToCurrentPage = true)
+        }
         super.onPause()
+    }
+
+    override fun onStop() {
+        wasStoppedInBackground = true
+        unregisterLiveTickReceiver()
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -656,7 +709,14 @@ class MainActivity : ComponentActivity() {
                     openHiddenAppsWithBiometric()
                 }
             }
-            lib.bind(installedApps, prefs.hiddenPackages, usageScores, iconCache)
+            lib.bind(
+                apps = installedApps,
+                hidden = prefs.hiddenPackages,
+                usage = usageScores,
+                cache = iconCache,
+                glassTheme = prefs.glassThemeStyle,
+                iconTheme = prefs.iconThemeStyle
+            )
             appLibraryPage = lib
             pages.add(lib)
         } else {
@@ -673,6 +733,7 @@ class MainActivity : ComponentActivity() {
         searchPill.showSearchLabel = prefs.showSearchPill
 
         bindDock()
+        applyGlassThemeToChrome()
         applySafeInsets(safeInsets)
     }
 
@@ -692,7 +753,8 @@ class MainActivity : ComponentActivity() {
         gridPage.removeAllViews()
         val pageItems = workspace.items.filter { it.page == gridPage.pageIndex }
         val isLarge = prefs.iconSizeMode == IconSizeMode.LARGE
-        val isDarkFolder = prefs.iconThemeStyle != IconThemeStyle.LIGHT
+        val isDarkFolder = prefs.iconThemeStyle != IconThemeStyle.LIGHT || prefs.glassThemeStyle == GlassThemeStyle.OBSIDIAN_GLASS
+        val isLiquidFolder = prefs.glassThemeStyle == GlassThemeStyle.LIQUID_GLASS
 
         for (item in pageItems) {
             val view: View = when (item) {
@@ -733,6 +795,7 @@ class MainActivity : ComponentActivity() {
                     showLabel = prefs.showAppLabels
                     largeMode = isLarge
                     darkGlassFolder = isDarkFolder
+                    liquidGlassFolder = isLiquidFolder
                     folderIcons = item.apps.take(9).map { iconCache.getIcon(it.packageName, it.className, it.label) }
                     badgeCount = if (prefs.showBadges) {
                         BadgeStore.countForPackages(item.apps.map { it.packageName })
@@ -790,7 +853,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bindDock() {
-        dockView.applyGlassStyle(prefs.iconThemeStyle, prefs.blurEnabled)
+        dockView.applyGlassStyle(prefs.iconThemeStyle, prefs.blurEnabled, prefs.glassThemeStyle)
         dockView.bind(
             slots = workspace.dock,
             iconCache = iconCache,
@@ -798,6 +861,14 @@ class MainActivity : ComponentActivity() {
             largeIcons = prefs.iconSizeMode == IconSizeMode.LARGE,
             jiggle = isJiggleMode
         )
+    }
+
+    private fun applyGlassThemeToChrome() {
+        dockView.applyGlassStyle(prefs.iconThemeStyle, prefs.blurEnabled, prefs.glassThemeStyle)
+        searchPill.glassThemeStyle = prefs.glassThemeStyle
+        folderOverlay.applyGlassTheme(prefs.glassThemeStyle, prefs.iconThemeStyle)
+        spotlightOverlay.applyGlassTheme(prefs.glassThemeStyle, prefs.iconThemeStyle)
+        contextMenuOverlay.applyGlassTheme(prefs.glassThemeStyle, prefs.iconThemeStyle)
     }
 
     // -------------------------------------------------------------------------
@@ -1337,6 +1408,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showQuickIconCustomizeDialog() {
         val options = arrayOf(
+            "Glass Theme: ${prefs.glassThemeStyle.label} (Tap to Switch)",
             "Light Icons (Default)",
             "Dark Mode Icons (iOS 18)",
             "Tinted Icons (iOS 18 Blue)",
@@ -1345,21 +1417,42 @@ class MainActivity : ComponentActivity() {
             "Toggle Large Icons"
         )
         AlertDialog.Builder(this)
-            .setTitle("iOS 18 Icon Style")
+            .setTitle("iOS Liquid Glass & Icons")
             .setItems(options) { _, which ->
+                if (which == 0) {
+                    showQuickGlassThemePicker()
+                    return@setItems
+                }
                 prefs = when (which) {
-                    0 -> prefs.copy(iconThemeStyle = IconThemeStyle.LIGHT)
-                    1 -> prefs.copy(iconThemeStyle = IconThemeStyle.DARK)
-                    2 -> prefs.copy(iconThemeStyle = IconThemeStyle.TINTED, iconTintColor = IosDesign.IOS_BLUE)
-                    3 -> prefs.copy(iosIconPackEnabled = !prefs.iosIconPackEnabled)
-                    4 -> prefs.copy(showAppLabels = !prefs.showAppLabels)
+                    1 -> prefs.copy(iconThemeStyle = IconThemeStyle.LIGHT)
+                    2 -> prefs.copy(iconThemeStyle = IconThemeStyle.DARK)
+                    3 -> prefs.copy(iconThemeStyle = IconThemeStyle.TINTED, iconTintColor = IosDesign.IOS_BLUE)
+                    4 -> prefs.copy(iosIconPackEnabled = !prefs.iosIconPackEnabled)
+                    5 -> prefs.copy(showAppLabels = !prefs.showAppLabels)
                     else -> prefs.copy(
                         iconSizeMode = if (prefs.iconSizeMode == IconSizeMode.LARGE) IconSizeMode.STANDARD else IconSizeMode.LARGE
                     )
                 }
                 repository.savePreferences(prefs)
-                iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled)
+                iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled, prefs.glassThemeStyle)
+                applyGlassThemeToChrome()
                 rebuildWorkspacePages(preserveCurrentPage = true)
+            }
+            .show()
+    }
+
+    private fun showQuickGlassThemePicker() {
+        val styles = GlassThemeStyle.entries
+        val names = styles.map { "${it.label}\n${it.subtitle}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Apple Glass Theme")
+            .setSingleChoiceItems(names, prefs.glassThemeStyle.ordinal) { dlg, which ->
+                prefs = prefs.copy(glassThemeStyle = styles[which])
+                repository.savePreferences(prefs)
+                iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled, prefs.glassThemeStyle)
+                applyGlassThemeToChrome()
+                rebuildWorkspacePages(preserveCurrentPage = true)
+                dlg.dismiss()
             }
             .show()
     }
@@ -1435,6 +1528,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openSettings() {
+        returningFromSettings = true
         startActivity(Intent(this, SettingsActivity::class.java))
     }
 
@@ -1494,7 +1588,8 @@ class MainActivity : ComponentActivity() {
     private fun setOverlayBlur(active: Boolean) {
         if (overlayBlurActive == active) return
         overlayBlurActive = active
-        ColorOsCompat.applyContentBlur(workspaceBlurContainer, if (active) 28f else 0f, prefs.blurEnabled)
+        val blurRadius = if (active) IosDesign.blurRadiusFor(prefs.glassThemeStyle, strong = true) else 0f
+        ColorOsCompat.applyContentBlur(workspaceBlurContainer, blurRadius, prefs.blurEnabled)
         ColorOsCompat.setWallpaperZoom(this, rootFrame, if (active) 0.45f else 0f)
     }
 

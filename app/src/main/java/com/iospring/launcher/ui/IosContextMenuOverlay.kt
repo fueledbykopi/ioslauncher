@@ -10,6 +10,8 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.iospring.launcher.model.GlassThemeStyle
+import com.iospring.launcher.model.IconThemeStyle
 
 /**
  * Authentic iOS 18 Haptic Touch Context Menu overlay.
@@ -30,12 +32,23 @@ class IosContextMenuOverlay(context: Context) : FrameLayout(context) {
 
     private val card = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        background = IosDesign.createGlassDrawable(
+        background = IosDesign.createThemeSurface(
             context = context,
-            cornerRadiusDp = 18f,
-            fillColor = 0xEB242428.toInt(),
-            strokeColor = 0x30FFFFFF,
-            strokeWidthDp = 0.8f
+            cornerRadiusDp = 22f,
+            glassStyle = GlassThemeStyle.LIQUID_GLASS,
+            iconStyle = IconThemeStyle.DARK,
+            strongSurface = true
+        )
+    }
+
+    fun applyGlassTheme(glassStyle: GlassThemeStyle, iconStyle: IconThemeStyle) {
+        val effectiveIcon = if (glassStyle == GlassThemeStyle.LIQUID_GLASS) IconThemeStyle.DARK else iconStyle
+        card.background = IosDesign.createThemeSurface(
+            context = context,
+            cornerRadiusDp = 22f,
+            glassStyle = glassStyle,
+            iconStyle = effectiveIcon,
+            strongSurface = true
         )
     }
 
