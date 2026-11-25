@@ -15,6 +15,7 @@ import android.text.TextUtils
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
+import android.view.animation.OvershootInterpolator
 import com.iospring.launcher.core.SquircleMath
 import kotlin.random.Random
 
@@ -84,22 +85,28 @@ class IosAppIconView(context: Context) : View(context) {
     private var lastFolderSize: Float = -1f
 
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val iconShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x26000000
+        style = Paint.Style.FILL
+    }
+    private val shadowRect = RectF()
+    private val releaseInterpolator = OvershootInterpolator(1.15f)
 
     private val folderBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
     private val folderBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = IosDesign.dp(context, 0.9f)
-        color = 0x44FFFFFF
+        strokeWidth = IosDesign.dp(context, 1.0f)
+        color = 0x52FFFFFF
     }
 
     private val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        textSize = IosDesign.sp(context, 11.5f)
+        textSize = IosDesign.sp(context, 11.8f)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
-        setShadowLayer(IosDesign.dp(context, 2.5f), 0f, IosDesign.dp(context, 1f), 0xAA000000.toInt())
+        setShadowLayer(IosDesign.dp(context, 3.0f), 0f, IosDesign.dp(context, 1.2f), 0xC0000000.toInt())
     }
 
     private val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -165,10 +172,10 @@ class IosAppIconView(context: Context) : View(context) {
         }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                animate().scaleX(0.90f).scaleY(0.90f).setDuration(95L).start()
+                animate().scaleX(0.88f).scaleY(0.88f).alpha(0.86f).setDuration(90L).setInterpolator(null).start()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                animate().scaleX(1f).scaleY(1f).setDuration(160L).start()
+                animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(190L).setInterpolator(releaseInterpolator).start()
             }
         }
         return super.onTouchEvent(event)
@@ -180,10 +187,10 @@ class IosAppIconView(context: Context) : View(context) {
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val showText = showLabel && !largeMode
+        val showText = showLabel
         val labelSpace = if (showText) IosDesign.dp(context, 18f) else 0f
         val maxIconSize = minOf(
-            w - IosDesign.dp(context, if (largeMode) 10f else 16f),
+            w - IosDesign.dp(context, if (largeMode) 10f else 15f),
             h - labelSpace - IosDesign.dp(context, 8f)
         ).coerceAtLeast(IosDesign.dp(context, 36f))
 
@@ -192,6 +199,17 @@ class IosAppIconView(context: Context) : View(context) {
         val left = (w - iconSize) / 2f
         val top = ((h - labelSpace) - iconSize) / 2f
         iconRect.set(left, top, left + iconSize, top + iconSize)
+
+        // Subtle iOS ambient elevation shadow under every squircle icon
+        val shadowOff = IosDesign.dp(context, 2.2f)
+        val shadowCorner = iconSize * 0.23f
+        shadowRect.set(
+            iconRect.left + shadowOff * 0.35f,
+            iconRect.top + shadowOff,
+            iconRect.right - shadowOff * 0.35f,
+            iconRect.bottom + shadowOff
+        )
+        canvas.drawRoundRect(shadowRect, shadowCorner, shadowCorner, iconShadowPaint)
 
         if (isFolder) {
             drawFolderIcon(canvas, iconRect)

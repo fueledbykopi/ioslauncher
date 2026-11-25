@@ -1,5 +1,7 @@
 package com.iospring.launcher.ui
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -22,6 +24,9 @@ class IosContextMenuOverlay(context: Context) : FrameLayout(context) {
     )
 
     var onDismiss: (() -> Unit)? = null
+
+    private var isDismissing: Boolean = false
+    private var animToken: Int = 0
 
     private val card = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -70,7 +75,7 @@ class IosContextMenuOverlay(context: Context) : FrameLayout(context) {
                 val vp = IosDesign.dpInt(context, 13f)
                 setPadding(hp, vp, hp, vp)
                 setOnClickListener {
-                    dismiss()
+                    dismiss(immediate = true)
                     action.onSelect()
                 }
             }
@@ -89,6 +94,11 @@ class IosContextMenuOverlay(context: Context) : FrameLayout(context) {
             card.addView(row)
         }
 
+        animToken++
+        isDismissing = false
+        animate().setListener(null).cancel()
+        card.animate().cancel()
+
         visibility = VISIBLE
         alpha = 0f
         card.scaleX = 0.85f
@@ -97,14 +107,59 @@ class IosContextMenuOverlay(context: Context) : FrameLayout(context) {
         card.animate().scaleX(1f).scaleY(1f).setDuration(190L).start()
     }
 
-    fun dismiss() {
+    fun dismiss(immediate: Boolean = false) {
         if (visibility != VISIBLE) return
-        animate().alpha(0f).setDuration(130L).withEndAction {
-            visibility = GONE
-            onDismiss?.invoke()
-        }.start()
+        val token = ++animToken
+        isDismissing = true
+        animate().setListener(null).cancel()
+        card.animate().cancel()
+
+        if (immediate) {
+            finalizeDismiss()
+            return
+        }
+
+        animate()
+            .alpha(0f)
+            .setDuration(130L)
+            .setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (animToken == token && isDismissing) {
+                        finalizeDismiss()
+                    }
+                }
+
+                override fun onAnimationCancel(animation: Animator) {
+                    if (animToken == token && isDismissing) {
+                        finalizeDismiss()
+                    }
+                }
+            })
+            .start()
         card.animate().scaleX(0.88f).scaleY(0.88f).setDuration(130L).start()
     }
 
-    val isOpen: Boolean get() = visibility == VISIBLE
+    fun finalizePendingDismiss() {
+        if (isDismissing || (visibility == VISIBLE && alpha < 0.05f)) {
+            dismiss(immediate = true)
+        }
+    }
+
+    private fun finalizeDismiss() {
+        animate().setListener(null)
+        isDismissing = false
+        visibility = GONE
+        alpha = 1f
+        card.scaleX = 1f
+        card.scaleY = 1f
+        onDismiss?.invoke()
+    }
+
+    override fun onDetachedFromWindow() {
+        animate().setListener(null).cancel()
+        card.animate().cancel()
+        super.onDetachedFromWindow()
+    }
+
+    val isOpen: Boolean get() = visibility == VISIBLE && !isDismissing
 }

@@ -15,6 +15,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.BatteryManager
 import android.os.Build
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -284,6 +285,7 @@ class IosBatteryWidgetView(context: Context) : View(context), RefreshableIosWidg
     private var isCharging: Boolean = false
     private var btName: String? = null
     private var btPct: Int? = null
+    private var lastBtPollMs: Long = 0L
 
     private val cardRect = RectF()
     private val ringRect = RectF()
@@ -331,13 +333,15 @@ class IosBatteryWidgetView(context: Context) : View(context), RefreshableIosWidg
                 status == BatteryManager.BATTERY_STATUS_FULL
         }
 
-        // Safely check connected Bluetooth audio/accessory battery (Android 12+ permission guarded)
-        btName = null
-        btPct = null
+        // Safely check connected Bluetooth audio/accessory battery (Android 12+ permission guarded, throttled)
+        val nowMs = SystemClock.elapsedRealtime()
         val canReadBt = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
             PackageManager.PERMISSION_GRANTED
-        if (canReadBt) {
+        if (canReadBt && (lastBtPollMs == 0L || nowMs - lastBtPollMs >= 30_000L)) {
+            lastBtPollMs = nowMs
+            btName = null
+            btPct = null
             try {
                 val bm = context.getSystemService(BluetoothManager::class.java)
                 val bonded = bm?.adapter?.bondedDevices.orEmpty()
@@ -359,6 +363,9 @@ class IosBatteryWidgetView(context: Context) : View(context), RefreshableIosWidg
             } catch (_: Exception) {
                 // Ignore Bluetooth errors safely
             }
+        } else if (!canReadBt) {
+            btName = null
+            btPct = null
         }
         invalidate()
     }

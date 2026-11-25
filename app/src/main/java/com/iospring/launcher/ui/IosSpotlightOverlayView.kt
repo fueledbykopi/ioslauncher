@@ -1,5 +1,7 @@
 package com.iospring.launcher.ui
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -34,6 +36,15 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
     private var hiddenPackages: Set<String> = emptySet()
     private var usageScores: Map<String, Long> = emptyMap()
     private var iconCache: IconCacheManager? = null
+    private var isDismissing: Boolean = false
+    private var animToken: Int = 0
+
+    private val showKeyboardRunnable = Runnable {
+        if (visibility == VISIBLE && !isDismissing) {
+            val imm = context.getSystemService(InputMethodManager::class.java)
+            imm?.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
 
     private val contentColumn = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -141,10 +152,10 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
                     val res = SpotlightEngine.search(q, installedApps, hiddenPackages, usageScores)
                     val first = res.matchedApps.firstOrNull()
                     if (first != null) {
-                        dismiss()
+                        dismiss(immediate = true)
                         onAppSelected?.invoke(first, searchInput)
                     } else {
-                        dismiss()
+                        dismiss(immediate = true)
                         onWebSearch?.invoke(q)
                     }
                 }
@@ -171,6 +182,11 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
         usageScores = usage
         iconCache = cache
 
+        animToken++
+        isDismissing = false
+        removeCallbacks(showKeyboardRunnable)
+        animate().setListener(null).cancel()
+
         searchInput.setText("")
         renderQuery("")
 
@@ -180,25 +196,67 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
         animate().alpha(1f).translationY(0f).setDuration(220L).start()
 
         searchInput.requestFocus()
-        postDelayed({
-            val imm = context.getSystemService(InputMethodManager::class.java)
-            imm?.showSoftInput(searchInput, InputMethodManager.SHOW_IMPLICIT)
-        }, 90L)
+        postDelayed(showKeyboardRunnable, 90L)
     }
 
-    fun dismiss() {
+    fun dismiss(immediate: Boolean = false) {
         if (visibility != VISIBLE) return
+        val token = ++animToken
+        isDismissing = true
+        removeCallbacks(showKeyboardRunnable)
         val imm = context.getSystemService(InputMethodManager::class.java)
         imm?.hideSoftInputFromWindow(searchInput.windowToken, 0)
         searchInput.clearFocus()
 
-        animate().alpha(0f).translationY(-IosDesign.dp(context, 20f)).setDuration(160L).withEndAction {
-            visibility = GONE
-            onDismiss?.invoke()
-        }.start()
+        animate().setListener(null).cancel()
+        if (immediate) {
+            finalizeDismiss()
+            return
+        }
+
+        animate()
+            .alpha(0f)
+            .translationY(-IosDesign.dp(context, 20f))
+            .setDuration(160L)
+            .setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (animToken == token && isDismissing) {
+                        finalizeDismiss()
+                    }
+                }
+
+                override fun onAnimationCancel(animation: Animator) {
+                    if (animToken == token && isDismissing) {
+                        finalizeDismiss()
+                    }
+                }
+            })
+            .start()
     }
 
-    val isOpen: Boolean get() = visibility == VISIBLE
+    fun finalizePendingDismiss() {
+        if (isDismissing || (visibility == VISIBLE && alpha < 0.05f)) {
+            dismiss(immediate = true)
+        }
+    }
+
+    private fun finalizeDismiss() {
+        removeCallbacks(showKeyboardRunnable)
+        animate().setListener(null)
+        isDismissing = false
+        visibility = GONE
+        alpha = 1f
+        translationY = 0f
+        onDismiss?.invoke()
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(showKeyboardRunnable)
+        animate().setListener(null).cancel()
+        super.onDetachedFromWindow()
+    }
+
+    val isOpen: Boolean get() = visibility == VISIBLE && !isDismissing
 
     private fun renderQuery(query: String) {
         resultsContainer.removeAllViews()
@@ -253,9 +311,9 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
                     packageNameRef = app.packageName
                     classNameRef = app.className
                     label = app.label
-                    iconBitmap = cache.getIcon(app.packageName, app.className)
+                    iconBitmap = cache.getIcon(app.packageName, app.className, app.label)
                     setOnClickListener {
-                        dismiss()
+                        dismiss(immediate = true)
                         onAppSelected?.invoke(app, this)
                     }
                 }
@@ -283,7 +341,7 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
                 val p = IosDesign.dpInt(context, 16f)
                 setPadding(p, IosDesign.dpInt(context, 14f), p, IosDesign.dpInt(context, 14f))
                 setOnClickListener {
-                    dismiss()
+                    dismiss(immediate = true)
                     onWebSearch?.invoke(query.trim())
                 }
             }

@@ -34,12 +34,13 @@ class IosDockView(context: Context) : FrameLayout(context) {
     private var showBadges: Boolean = true
 
     init {
-        val dockRadius = 30f
-        backdropLayer.background = IosDesign.createGlassDrawable(
+        val dockRadius = 31f
+        backdropLayer.background = IosDesign.createFrostedSurface(
             context = context,
             cornerRadiusDp = dockRadius,
-            fillColor = IosDesign.IOS_DOCK_GLASS,
-            strokeColor = 0x48FFFFFF,
+            topFillColor = 0x58F2F2F8,
+            bottomFillColor = 0x3AD6D6E0,
+            strokeColor = 0x58FFFFFF,
             strokeWidthDp = 0.9f
         )
         addView(backdropLayer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -51,21 +52,21 @@ class IosDockView(context: Context) : FrameLayout(context) {
     }
 
     fun applyGlassStyle(style: IconThemeStyle, blurEnabled: Boolean) {
-        val fill = when (style) {
-            IconThemeStyle.LIGHT -> IosDesign.IOS_DOCK_GLASS
-            IconThemeStyle.DARK, IconThemeStyle.TINTED -> IosDesign.IOS_DOCK_DARK_GLASS
+        val (topFill, bottomFill, stroke) = when (style) {
+            IconThemeStyle.LIGHT -> Triple(0x58F2F2F8, 0x3AD6D6E0, 0x58FFFFFF)
+            IconThemeStyle.DARK, IconThemeStyle.TINTED -> Triple(0x782C2C30, 0x5C161618, 0x36FFFFFF)
         }
-        val stroke = if (style == IconThemeStyle.LIGHT) 0x4CFFFFFF else 0x2EFFFFFF
-        backdropLayer.background = IosDesign.createGlassDrawable(
+        backdropLayer.background = IosDesign.createFrostedSurface(
             context = context,
-            cornerRadiusDp = 30f,
-            fillColor = fill,
+            cornerRadiusDp = 31f,
+            topFillColor = topFill,
+            bottomFillColor = bottomFill,
             strokeColor = stroke,
             strokeWidthDp = 0.9f
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             backdropLayer.setRenderEffect(
-                if (blurEnabled) RenderEffect.createBlurEffect(18f, 18f, Shader.TileMode.CLAMP) else null
+                if (blurEnabled) RenderEffect.createBlurEffect(20f, 20f, Shader.TileMode.CLAMP) else null
             )
         }
     }
@@ -90,7 +91,7 @@ class IosDockView(context: Context) : FrameLayout(context) {
                 label = slot.label
                 showLabel = false // iOS Dock icons never show labels
                 largeMode = largeIcons
-                iconBitmap = iconCache.getIcon(slot.packageName, slot.className)
+                iconBitmap = iconCache.getIcon(slot.packageName, slot.className, slot.label)
                 badgeCount = if (showBadges) BadgeStore.countForPackage(slot.packageName) else 0
                 setJiggling(jiggle)
                 setOnClickListener {

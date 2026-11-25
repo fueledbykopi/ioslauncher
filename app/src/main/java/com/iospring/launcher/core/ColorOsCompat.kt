@@ -16,6 +16,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import kotlin.math.abs
 
 /**
  * Safe insets extracted for OPPO Android 15 (ColorOS 15) edge-to-edge gesture navigation.
@@ -37,6 +38,9 @@ data class GestureSafeInsets(
  * - GPU-accelerated Android 12+ RenderEffect blur for frosted glass overlays
  */
 object ColorOsCompat {
+
+    private var lastWallpaperSteps: Int = -1
+    private var lastWallpaperProgress: Float = -1f
 
     fun configureEdgeToEdge(activity: ComponentActivity) {
         activity.enableEdgeToEdge(
@@ -85,14 +89,17 @@ object ColorOsCompat {
 
             val density = rootView.resources.displayMetrics.density
             val minEdgePx = (24f * density).toInt()
+            val maxEdgePx = (40f * density).toInt()
             val minBottomPx = (22f * density).toInt()
+            val maxBottomPx = (56f * density).toInt()
 
             val safe = GestureSafeInsets(
                 statusBarTop = sysBars.top,
                 navBarBottom = sysBars.bottom,
-                gestureLeft = maxOf(sysGestures.left, minEdgePx),
-                gestureRight = maxOf(sysGestures.right, minEdgePx),
-                gestureBottom = maxOf(sysGestures.bottom, mandatory.bottom, sysBars.bottom, minBottomPx)
+                gestureLeft = sysGestures.left.coerceIn(minEdgePx, maxEdgePx),
+                gestureRight = sysGestures.right.coerceIn(minEdgePx, maxEdgePx),
+                gestureBottom = maxOf(sysGestures.bottom, mandatory.bottom, sysBars.bottom)
+                    .coerceIn(minBottomPx, maxBottomPx)
             )
             onInsetsChanged(safe)
             insets
@@ -101,7 +108,7 @@ object ColorOsCompat {
     }
 
     /**
-     * Checks whether a touch starting at (rawX, rawY) lies inside ColorOS 15's reserved
+     * Checks whether a touch starting at (x, y) lies inside ColorOS 15's reserved
      * system gesture edge zones (left/right back or bottom home/recents bar).
      */
     fun isInSystemGestureZone(
@@ -112,9 +119,14 @@ object ColorOsCompat {
         insets: GestureSafeInsets,
         enabled: Boolean
     ): Boolean {
-        if (!enabled) return false
-        if (x <= insets.gestureLeft || x >= viewWidth - insets.gestureRight) return true
-        if (y >= viewHeight - insets.gestureBottom) return true
+        if (!enabled || viewWidth <= 0 || viewHeight <= 0) return false
+        val maxEdge = (viewWidth * 0.20f).toInt()
+        val maxBottom = (viewHeight * 0.20f).toInt()
+        val leftZone = insets.gestureLeft.coerceIn(0, maxEdge)
+        val rightZone = insets.gestureRight.coerceIn(0, maxEdge)
+        val bottomZone = insets.gestureBottom.coerceIn(0, maxBottom)
+        if (x <= leftZone || x >= viewWidth - rightZone) return true
+        if (y >= viewHeight - bottomZone) return true
         return false
     }
 
@@ -124,8 +136,9 @@ object ColorOsCompat {
         insets: GestureSafeInsets,
         enabled: Boolean
     ): Boolean {
-        if (!enabled) return false
-        return y >= viewHeight - insets.gestureBottom
+        if (!enabled || viewHeight <= 0) return false
+        val bottomZone = insets.gestureBottom.coerceIn(0, (viewHeight * 0.20f).toInt())
+        return y >= viewHeight - bottomZone
     }
 
     /**
@@ -137,12 +150,21 @@ object ColorOsCompat {
         normalizedProgress: Float,
         totalPages: Int
     ) {
+        if (!normalizedProgress.isFinite()) return
         val token = rootView.windowToken ?: return
+        val steps = (totalPages - 1).coerceAtLeast(1)
+        val clamped = normalizedProgress.coerceIn(0f, 1f)
+        if (steps == lastWallpaperSteps && abs(clamped - lastWallpaperProgress) < 0.0005f) {
+            return
+        }
         try {
             val wm = WallpaperManager.getInstance(activity)
-            val steps = (totalPages - 1).coerceAtLeast(1)
-            wm.setWallpaperOffsetSteps(1f / steps, 0f)
-            wm.setWallpaperOffsets(token, normalizedProgress.coerceIn(0f, 1f), 0.5f)
+            if (steps != lastWallpaperSteps) {
+                wm.setWallpaperOffsetSteps(1f / steps, 0f)
+                lastWallpaperSteps = steps
+            }
+            wm.setWallpaperOffsets(token, clamped, 0.5f)
+            lastWallpaperProgress = clamped
         } catch (_: Exception) {
             // Safe no-op on restricted ROMs or headless tests
         }

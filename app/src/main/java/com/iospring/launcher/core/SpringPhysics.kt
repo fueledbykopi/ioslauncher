@@ -52,7 +52,15 @@ class SpringState(
         positionEpsilon: Float = 0.25f,
         velocityEpsilon: Float = 0.5f
     ): Boolean {
-        val clampedDt = dtSeconds.coerceIn(0.001f, 0.05f)
+        if (!target.isFinite()) {
+            velocity = 0f
+            return true
+        }
+        if (!value.isFinite()) value = target
+        if (!velocity.isFinite()) velocity = 0f
+
+        val safeDt = if (dtSeconds.isFinite()) dtSeconds else 1f / 120f
+        val clampedDt = safeDt.coerceIn(0.001f, 0.05f)
         val stiffness = config.stiffness
         val damping = config.damping
 
@@ -65,6 +73,12 @@ class SpringState(
             velocity += force * dt
             value += velocity * dt
             remaining -= dt
+        }
+
+        if (!value.isFinite() || !velocity.isFinite()) {
+            value = target
+            velocity = 0f
+            return true
         }
 
         val settled = abs(value - target) <= positionEpsilon && abs(velocity) <= velocityEpsilon
@@ -111,7 +125,15 @@ class ChoreographerSpring(
     val currentValue: Float get() = state.value
     val isRunning: Boolean get() = running
 
+    fun setCurrentValue(value: Float) {
+        if (!value.isFinite()) return
+        state.value = value
+        state.velocity = 0f
+        target = value
+    }
+
     fun snapTo(value: Float) {
+        if (!value.isFinite()) return
         cancel()
         state.value = value
         state.velocity = 0f
@@ -120,9 +142,15 @@ class ChoreographerSpring(
     }
 
     fun animateTo(newTarget: Float, initialVelocity: Float? = null) {
+        if (!newTarget.isFinite()) return
         target = newTarget
-        if (initialVelocity != null) {
+        if (initialVelocity != null && initialVelocity.isFinite()) {
             state.velocity = initialVelocity
+        } else if (!state.velocity.isFinite()) {
+            state.velocity = 0f
+        }
+        if (!state.value.isFinite()) {
+            state.value = newTarget
         }
         if (!running) {
             running = true

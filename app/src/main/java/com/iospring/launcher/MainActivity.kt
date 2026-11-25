@@ -43,6 +43,7 @@ import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.model.LauncherPreferences
 import com.iospring.launcher.model.LauncherWorkspaceState
 import com.iospring.launcher.service.BadgeStore
+import com.iospring.launcher.service.LauncherKeepAliveService
 import com.iospring.launcher.service.PackageChangeReceiver
 import com.iospring.launcher.ui.IosAppIconView
 import com.iospring.launcher.ui.IosAppLibraryPage
@@ -60,8 +61,10 @@ import com.iospring.launcher.widget.IosBuiltInWidgetFactory
 import com.iospring.launcher.widget.RefreshableIosWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -87,6 +90,11 @@ class MainActivity : ComponentActivity() {
 
     private var isJiggleMode: Boolean = false
     private var currentHomePageOffset: Int = 0 // 1 if Today View is enabled, else 0
+    private var isActivityResumed: Boolean = false
+    private var pendingWorkspaceRebuild: Boolean = false
+    private var overlayBlurActive: Boolean = false
+    private val pendingPackageUpdates = LinkedHashMap<String, Boolean>()
+    private var packageUpdateJob: Job? = null
 
     // Root & Layered Views
     private lateinit var rootFrame: FrameLayout
@@ -140,7 +148,7 @@ class MainActivity : ComponentActivity() {
         dragTouchSlop = ViewConfiguration.get(this).scaledTouchSlop
 
         prefs = repository.loadPreferences()
-        iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor)
+        iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled)
 
         buildViewHierarchy()
         setContentView(rootFrame)
@@ -180,33 +188,57 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        isActivityResumed = true
         ColorOsCompat.syncStatusBarAppearanceWithWallpaper(this)
+
+        // Ensure no interrupted overlay dismiss or stale drag state can ever block swipes
+        folderOverlay.finalizePendingDismiss()
+        spotlightOverlay.finalizePendingDismiss()
+        contextMenuOverlay.finalizePendingDismiss()
+        if (!folderOverlay.isOpen && !spotlightOverlay.isOpen && !contextMenuOverlay.isOpen) {
+            setOverlayBlur(false)
+        }
+        if (dragItem == null) {
+            pager.resetTouchState(snapToCurrentPage = true)
+        }
 
         // Reload preferences in case user changed theme/grid/hidden apps in SettingsActivity
         val latestPrefs = repository.loadPreferences()
         if (latestPrefs != prefs) {
             val themeChanged = latestPrefs.iconThemeStyle != prefs.iconThemeStyle ||
-                latestPrefs.iconTintColor != prefs.iconTintColor
+                latestPrefs.iconTintColor != prefs.iconTintColor ||
+                latestPrefs.iosIconPackEnabled != prefs.iosIconPackEnabled
             prefs = latestPrefs
             if (themeChanged) {
-                iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor)
+                iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled)
             }
             pager.colorOsSafeZoneEnabled = prefs.colorOsGestureSafeZone
             pager.swipeDownSpotlightEnabled = prefs.swipeDownSpotlight
             repository.reconcileWithInstalledApps(workspace, installedApps, prefs)
+            pendingWorkspaceRebuild = false
+            rebuildWorkspacePages(preserveCurrentPage = true)
+        } else if (pendingWorkspaceRebuild) {
+            pendingWorkspaceRebuild = false
             rebuildWorkspacePages(preserveCurrentPage = true)
         }
 
+        LauncherKeepAliveService.syncState(this, prefs.keepInRamEnabled)
         registerLiveTickReceiver()
         refreshVisibleWidgets()
         refreshBadgesInPlace()
     }
 
     override fun onPause() {
+        isActivityResumed = false
         unregisterLiveTickReceiver()
         if (isJiggleMode) {
             exitJiggleMode()
         }
+        folderOverlay.finalizePendingDismiss()
+        spotlightOverlay.finalizePendingDismiss()
+        contextMenuOverlay.finalizePendingDismiss()
+        appLibraryPage?.clearSearchFocus()
+        pager.resetTouchState(snapToCurrentPage = true)
         super.onPause()
     }
 
@@ -215,13 +247,16 @@ class MainActivity : ComponentActivity() {
         packageReceiver?.unregister(this)
         unregisterLiveTickReceiver()
         mainScope.cancel()
+        repository.close()
         super.onDestroy()
     }
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= TRIM_MEMORY_BACKGROUND) {
-            iconCache.clearMemory()
+        if (level >= TRIM_MEMORY_COMPLETE) {
+            iconCache.trimMemory(aggressive = true)
+        } else if (level >= TRIM_MEMORY_BACKGROUND) {
+            iconCache.trimMemory(aggressive = false)
         }
     }
 
@@ -482,12 +517,12 @@ class MainActivity : ComponentActivity() {
                 val usage = repository.loadUsageScores()
                 val ws = repository.loadOrCreateWorkspace(appsList, prefs)
                 // Warm icon cache for Dock & Page 0 on background IO thread for instant first frame
-                ws.dock.forEach { iconCache.getIcon(it.packageName, it.className) }
+                ws.dock.forEach { iconCache.getIcon(it.packageName, it.className, it.label) }
                 ws.items.filter { it.page == 0 }.forEach { item ->
                     when (item) {
-                        is HomeItem.AppShortcut -> iconCache.getIcon(item.packageName, item.className)
+                        is HomeItem.AppShortcut -> iconCache.getIcon(item.packageName, item.className, item.label)
                         is HomeItem.FolderItem -> item.apps.take(9).forEach {
-                            iconCache.getIcon(it.packageName, it.className)
+                            iconCache.getIcon(it.packageName, it.className, it.label)
                         }
                         else -> Unit
                     }
@@ -502,30 +537,53 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIncrementalPackageUpdate(packageName: String, removed: Boolean) {
-        mainScope.launch {
+        pendingPackageUpdates[packageName] = removed
+        packageUpdateJob?.cancel()
+        packageUpdateJob = mainScope.launch {
+            // Coalesce bursts of ACTION_PACKAGE_CHANGED broadcasts (e.g. Play Services / Play Store)
+            delay(350L)
+            val batch = HashMap(pendingPackageUpdates)
+            pendingPackageUpdates.clear()
+            if (batch.isEmpty()) return@launch
+
+            val snapshot = installedApps
             val updatedList = withContext(Dispatchers.IO) {
-                val mutable = installedApps.filterNot { it.packageName == packageName }.toMutableList()
-                if (!removed) {
-                    val freshForPkg = repository.loadAppForPackage(packageName)
-                    mutable.addAll(freshForPkg)
+                val mutable = snapshot.filterNot { it.packageName in batch }.toMutableList()
+                for ((pkg, isRemoved) in batch) {
+                    if (!isRemoved) {
+                        mutable.addAll(repository.loadAppForPackage(pkg))
+                    }
                 }
                 mutable.sortBy { it.label.lowercase() }
                 mutable
             }
 
+            // Skip expensive view rebuilds when a background package component change didn't affect launcher apps
+            if (updatedList == installedApps) {
+                return@launch
+            }
+
             val previousKeys = installedApps.map { it.componentKey }.toSet()
             installedApps = updatedList
 
-            if (!removed) {
-                // Auto-place newly installed apps on last Home page (just like iOS!)
-                val newApps = updatedList.filter { it.packageName == packageName && it.componentKey !in previousKeys }
-                for (app in newApps) {
-                    placeNewAppOnHome(app)
+            for ((pkg, isRemoved) in batch) {
+                if (!isRemoved) {
+                    // Auto-place newly installed apps on last Home page (just like iOS!)
+                    val newApps = updatedList.filter { it.packageName == pkg && it.componentKey !in previousKeys }
+                    for (app in newApps) {
+                        placeNewAppOnHome(app)
+                    }
                 }
             }
             repository.reconcileWithInstalledApps(workspace, installedApps, prefs)
             repository.saveWorkspaceAsync(workspace)
-            rebuildWorkspacePages(preserveCurrentPage = true)
+
+            if (isActivityResumed && dragItem == null) {
+                rebuildWorkspacePages(preserveCurrentPage = true)
+            } else {
+                // Defer full view hierarchy rebuild until launcher resumes (avoids background stalls & drag detach)
+                pendingWorkspaceRebuild = true
+            }
         }
     }
 
@@ -643,8 +701,9 @@ class MainActivity : ComponentActivity() {
                     packageNameRef = item.packageName
                     classNameRef = item.className
                     label = item.label
+                    showLabel = prefs.showAppLabels
                     largeMode = isLarge
-                    iconBitmap = iconCache.getIcon(item.packageName, item.className)
+                    iconBitmap = iconCache.getIcon(item.packageName, item.className, item.label)
                     badgeCount = if (prefs.showBadges) BadgeStore.countForPackage(item.packageName) else 0
                     setJiggling(isJiggleMode)
                     setOnClickListener {
@@ -671,9 +730,10 @@ class MainActivity : ComponentActivity() {
                     itemId = item.id
                     isFolder = true
                     label = item.title
+                    showLabel = prefs.showAppLabels
                     largeMode = isLarge
                     darkGlassFolder = isDarkFolder
-                    folderIcons = item.apps.take(9).map { iconCache.getIcon(it.packageName, it.className) }
+                    folderIcons = item.apps.take(9).map { iconCache.getIcon(it.packageName, it.className, it.label) }
                     badgeCount = if (prefs.showBadges) {
                         BadgeStore.countForPackages(item.apps.map { it.packageName })
                     } else 0
@@ -681,7 +741,9 @@ class MainActivity : ComponentActivity() {
                     setOnClickListener {
                         if (!isJiggleMode) {
                             setOverlayBlur(true)
-                            folderOverlay.openFolder(item, iconCache, prefs.showBadges, isLarge, isJiggleMode)
+                            folderOverlay.openFolder(
+                                item, iconCache, prefs.showBadges, isLarge, isJiggleMode, prefs.showAppLabels
+                            )
                         }
                     }
                     setOnLongClickListener {
@@ -814,7 +876,7 @@ class MainActivity : ComponentActivity() {
             scaleY = 1.12f
             alpha = 0.92f
             when (item) {
-                is HomeItem.AppShortcut -> setImageBitmap(iconCache.getIcon(item.packageName, item.className))
+                is HomeItem.AppShortcut -> setImageBitmap(iconCache.getIcon(item.packageName, item.className, item.label))
                 is HomeItem.FolderItem -> background = IosDesign.createGlassDrawable(this@MainActivity, 20f, 0x66FFFFFF)
                 else -> background = IosDesign.createGlassDrawable(this@MainActivity, 22f, 0x66FFFFFF)
             }
@@ -968,10 +1030,22 @@ class MainActivity : ComponentActivity() {
                 if (currentIdx < lastHomeIdx) {
                     pager.scrollToPage(currentIdx + 1, animate = true)
                 } else if (homeGridPages.size < 8) {
-                    // Add a new blank Home page when dragging past rightmost page!
-                    workspace.pagesCount = homeGridPages.size + 1
-                    rebuildWorkspacePages(preserveCurrentPage = true)
-                    pager.scrollToPage(currentHomePageOffset + workspace.pagesCount - 1, animate = true)
+                    // Add a new blank Home page without detaching the currently dragged view!
+                    val newHomeIdx = homeGridPages.size
+                    val newGridPage = createHomeGridPage(newHomeIdx)
+                    val dockBottomMargin = maxOf(safeInsets.navBarBottom, IosDesign.dpInt(this, 10f)) + IosDesign.dpInt(this, 10f)
+                    val dockHeight = IosDesign.dpInt(this, 86f)
+                    val gridTop = safeInsets.statusBarTop + IosDesign.dpInt(this, 14f)
+                    val gridBottom = dockBottomMargin + dockHeight + IosDesign.dpInt(this, 48f)
+                    val gridSide = IosDesign.dpInt(this, 14f)
+                    newGridPage.setPadding(gridSide, gridTop, gridSide, gridBottom)
+
+                    homeGridPages.add(newGridPage)
+                    workspace.pagesCount = homeGridPages.size
+                    searchPill.totalHomePages = homeGridPages.size
+                    val insertPagerIdx = currentHomePageOffset + newHomeIdx
+                    pager.insertPage(insertPagerIdx, newGridPage)
+                    pager.scrollToPage(insertPagerIdx, animate = true)
                 }
             }
         }
@@ -1104,7 +1178,8 @@ class MainActivity : ComponentActivity() {
             iconCache = iconCache,
             showBadges = prefs.showBadges,
             largeIcons = prefs.iconSizeMode == IconSizeMode.LARGE,
-            jiggleMode = false
+            jiggleMode = false,
+            showLabels = prefs.showAppLabels
         )
     }
 
@@ -1265,7 +1340,9 @@ class MainActivity : ComponentActivity() {
             "Light Icons (Default)",
             "Dark Mode Icons (iOS 18)",
             "Tinted Icons (iOS 18 Blue)",
-            "Toggle Large Icons (Hide Labels)"
+            if (prefs.iosIconPackEnabled) "Built-in iOS Icon Pack: ON (Tap to Disable)" else "Built-in iOS Icon Pack: OFF (Tap to Enable)",
+            if (prefs.showAppLabels) "App Labels Below Icons: ON (Tap to Hide)" else "App Labels Below Icons: OFF (Tap to Show)",
+            "Toggle Large Icons"
         )
         AlertDialog.Builder(this)
             .setTitle("iOS 18 Icon Style")
@@ -1274,12 +1351,14 @@ class MainActivity : ComponentActivity() {
                     0 -> prefs.copy(iconThemeStyle = IconThemeStyle.LIGHT)
                     1 -> prefs.copy(iconThemeStyle = IconThemeStyle.DARK)
                     2 -> prefs.copy(iconThemeStyle = IconThemeStyle.TINTED, iconTintColor = IosDesign.IOS_BLUE)
+                    3 -> prefs.copy(iosIconPackEnabled = !prefs.iosIconPackEnabled)
+                    4 -> prefs.copy(showAppLabels = !prefs.showAppLabels)
                     else -> prefs.copy(
                         iconSizeMode = if (prefs.iconSizeMode == IconSizeMode.LARGE) IconSizeMode.STANDARD else IconSizeMode.LARGE
                     )
                 }
                 repository.savePreferences(prefs)
-                iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor)
+                iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled)
                 rebuildWorkspacePages(preserveCurrentPage = true)
             }
             .show()
@@ -1386,6 +1465,10 @@ class MainActivity : ComponentActivity() {
         if (homeIdx in 0 until homeGridPages.size) {
             searchPill.showPageDotsTemporarily(homeIdx)
         }
+        val appLibIdx = if (prefs.appLibraryEnabled) currentHomePageOffset + homeGridPages.size else -1
+        if (pageIdx != appLibIdx) {
+            appLibraryPage?.clearSearchFocus()
+        }
     }
 
     private fun updateDockAndPillVisibility(scrollPx: Float, pageW: Int) {
@@ -1399,13 +1482,18 @@ class MainActivity : ComponentActivity() {
             scrollPx > lastHomePx -> (1f - ((scrollPx - lastHomePx) / pageW)).coerceIn(0f, 1f)
             else -> 1f
         }
+        val visible = alphaFactor > 0.02f
         dockView.alpha = alphaFactor
         searchPill.alpha = alphaFactor
+        dockView.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+        searchPill.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         dockView.isClickable = alphaFactor > 0.5f
         searchPill.isClickable = alphaFactor > 0.5f
     }
 
     private fun setOverlayBlur(active: Boolean) {
+        if (overlayBlurActive == active) return
+        overlayBlurActive = active
         ColorOsCompat.applyContentBlur(workspaceBlurContainer, if (active) 28f else 0f, prefs.blurEnabled)
         ColorOsCompat.setWallpaperZoom(this, rootFrame, if (active) 0.45f else 0f)
     }

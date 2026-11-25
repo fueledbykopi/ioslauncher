@@ -1,5 +1,7 @@
 package com.iospring.launcher.ui
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -8,6 +10,7 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridLayout
@@ -24,6 +27,8 @@ import com.iospring.launcher.service.BadgeStore
 class IosFolderOverlayView(context: Context) : FrameLayout(context) {
 
     private var currentFolder: HomeItem.FolderItem? = null
+    private var isDismissing: Boolean = false
+    private var animToken: Int = 0
 
     var onAppClick: ((HomeItem.AppShortcut, View) -> Unit)? = null
     var onAppRemoveFromFolder: ((HomeItem.FolderItem, HomeItem.AppShortcut) -> Unit)? = null
@@ -68,12 +73,13 @@ class IosFolderOverlayView(context: Context) : FrameLayout(context) {
         }
         contentColumn.addView(titleEdit, titleLp)
 
-        val cardSize = IosDesign.dpInt(context, 308f)
-        cardContainer.background = IosDesign.createGlassDrawable(
+        val cardSize = IosDesign.dpInt(context, 312f)
+        cardContainer.background = IosDesign.createFrostedSurface(
             context = context,
-            cornerRadiusDp = 34f,
-            fillColor = 0x52F2F2F7,
-            strokeColor = 0x4CFFFFFF,
+            cornerRadiusDp = 36f,
+            topFillColor = 0x62F5F5FA,
+            bottomFillColor = 0x46DCDCE6,
+            strokeColor = 0x58FFFFFF,
             strokeWidthDp = 1f
         )
         val pad = IosDesign.dpInt(context, 16f)
@@ -110,11 +116,17 @@ class IosFolderOverlayView(context: Context) : FrameLayout(context) {
         iconCache: IconCacheManager,
         showBadges: Boolean,
         largeIcons: Boolean,
-        jiggleMode: Boolean
+        jiggleMode: Boolean,
+        showLabels: Boolean = true
     ) {
+        animToken++
+        isDismissing = false
+        animate().setListener(null).cancel()
+        contentColumn.animate().cancel()
+
         currentFolder = folder
         titleEdit.setText(folder.title)
-        populateGrid(folder, iconCache, showBadges, largeIcons, jiggleMode)
+        populateGrid(folder, iconCache, showBadges, largeIcons, jiggleMode, showLabels)
 
         visibility = VISIBLE
         alpha = 0f
@@ -133,7 +145,8 @@ class IosFolderOverlayView(context: Context) : FrameLayout(context) {
         iconCache: IconCacheManager,
         showBadges: Boolean,
         largeIcons: Boolean,
-        jiggleMode: Boolean
+        jiggleMode: Boolean,
+        showLabels: Boolean
     ) {
         grid.removeAllViews()
         val cellSize = IosDesign.dpInt(context, 90f)
@@ -143,12 +156,13 @@ class IosFolderOverlayView(context: Context) : FrameLayout(context) {
                 packageNameRef = app.packageName
                 classNameRef = app.className
                 label = app.label
+                showLabel = showLabels
                 largeMode = largeIcons
-                iconBitmap = iconCache.getIcon(app.packageName, app.className)
+                iconBitmap = iconCache.getIcon(app.packageName, app.className, app.label)
                 badgeCount = if (showBadges) BadgeStore.countForPackage(app.packageName) else 0
                 setJiggling(jiggleMode)
                 setOnClickListener {
-                    dismiss()
+                    dismiss(immediate = true)
                     onAppClick?.invoke(app, this)
                 }
                 setOnLongClickListener {
@@ -167,15 +181,63 @@ class IosFolderOverlayView(context: Context) : FrameLayout(context) {
         }
     }
 
-    fun dismiss() {
+    fun dismiss(immediate: Boolean = false) {
         if (visibility != VISIBLE) return
+        val token = ++animToken
+        isDismissing = true
         currentFolder = null
-        animate().alpha(0f).setDuration(150L).withEndAction {
-            visibility = GONE
-            onDismiss?.invoke()
-        }.start()
+        val imm = context.getSystemService(InputMethodManager::class.java)
+        imm?.hideSoftInputFromWindow(titleEdit.windowToken, 0)
+        titleEdit.clearFocus()
+
+        animate().setListener(null).cancel()
+        contentColumn.animate().cancel()
+        if (immediate) {
+            finalizeDismiss()
+            return
+        }
+
+        animate()
+            .alpha(0f)
+            .setDuration(150L)
+            .setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (animToken == token && isDismissing) {
+                        finalizeDismiss()
+                    }
+                }
+
+                override fun onAnimationCancel(animation: Animator) {
+                    if (animToken == token && isDismissing) {
+                        finalizeDismiss()
+                    }
+                }
+            })
+            .start()
         contentColumn.animate().scaleX(0.86f).scaleY(0.86f).setDuration(150L).start()
     }
 
-    val isOpen: Boolean get() = visibility == VISIBLE
+    fun finalizePendingDismiss() {
+        if (isDismissing || (visibility == VISIBLE && alpha < 0.05f)) {
+            dismiss(immediate = true)
+        }
+    }
+
+    private fun finalizeDismiss() {
+        animate().setListener(null)
+        isDismissing = false
+        visibility = GONE
+        alpha = 1f
+        contentColumn.scaleX = 1f
+        contentColumn.scaleY = 1f
+        onDismiss?.invoke()
+    }
+
+    override fun onDetachedFromWindow() {
+        animate().setListener(null).cancel()
+        contentColumn.animate().cancel()
+        super.onDetachedFromWindow()
+    }
+
+    val isOpen: Boolean get() = visibility == VISIBLE && !isDismissing
 }

@@ -110,6 +110,9 @@ class LauncherRepository(private val context: Context) {
             iconThemeStyle = IconThemeStyle.entries.getOrElse(styleOrd) { IconThemeStyle.LIGHT },
             iconTintColor = prefs.getInt(KEY_ICON_TINT, Color.parseColor("#0A84FF")),
             iconSizeMode = IconSizeMode.entries.getOrElse(sizeOrd) { IconSizeMode.STANDARD },
+            showAppLabels = prefs.getBoolean(KEY_SHOW_APP_LABELS, true),
+            iosIconPackEnabled = prefs.getBoolean(KEY_IOS_ICON_PACK, true),
+            keepInRamEnabled = prefs.getBoolean(KEY_KEEP_IN_RAM, true),
             showSearchPill = prefs.getBoolean(KEY_SEARCH_PILL, true),
             showBadges = prefs.getBoolean(KEY_SHOW_BADGES, true),
             hapticsEnabled = prefs.getBoolean(KEY_HAPTICS, true),
@@ -130,6 +133,9 @@ class LauncherRepository(private val context: Context) {
             .putInt(KEY_ICON_STYLE, p.iconThemeStyle.ordinal)
             .putInt(KEY_ICON_TINT, p.iconTintColor)
             .putInt(KEY_ICON_SIZE, p.iconSizeMode.ordinal)
+            .putBoolean(KEY_SHOW_APP_LABELS, p.showAppLabels)
+            .putBoolean(KEY_IOS_ICON_PACK, p.iosIconPackEnabled)
+            .putBoolean(KEY_KEEP_IN_RAM, p.keepInRamEnabled)
             .putBoolean(KEY_SEARCH_PILL, p.showSearchPill)
             .putBoolean(KEY_SHOW_BADGES, p.showBadges)
             .putBoolean(KEY_HAPTICS, p.hapticsEnabled)
@@ -141,6 +147,10 @@ class LauncherRepository(private val context: Context) {
             .putStringSet(KEY_HIDDEN_PACKAGES, p.hiddenPackages)
             .putStringSet(KEY_LOCKED_PACKAGES, p.lockedPackages)
             .apply()
+    }
+
+    fun close() {
+        ioExecutor.shutdown()
     }
 
     fun recordAppLaunch(componentKey: String) {
@@ -335,6 +345,9 @@ class LauncherRepository(private val context: Context) {
         private const val KEY_ICON_STYLE = "icon_style"
         private const val KEY_ICON_TINT = "icon_tint"
         private const val KEY_ICON_SIZE = "icon_size"
+        private const val KEY_SHOW_APP_LABELS = "show_app_labels"
+        private const val KEY_IOS_ICON_PACK = "ios_icon_pack"
+        private const val KEY_KEEP_IN_RAM = "keep_in_ram"
         private const val KEY_SEARCH_PILL = "search_pill"
         private const val KEY_SHOW_BADGES = "show_badges"
         private const val KEY_HAPTICS = "haptics"

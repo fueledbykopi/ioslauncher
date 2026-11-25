@@ -12,6 +12,7 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridLayout
@@ -42,6 +43,7 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
     private var iconCache: IconCacheManager? = null
 
     private var isListMode: Boolean = false
+    private var alphaListDirty: Boolean = true
 
     private val mainColumn = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -150,9 +152,13 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
                 val q = s?.toString().orEmpty()
+                if (q.isEmpty() && !isListMode) {
+                    return
+                }
                 if (q.isNotEmpty() && !isListMode) {
                     setListMode(true)
                 }
+                alphaListDirty = false
                 renderAlphaList(q)
             }
         })
@@ -180,8 +186,20 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         hiddenPackages = hidden
         usageScores = usage
         iconCache = cache
+        alphaListDirty = true
         renderCategoryFolders()
-        renderAlphaList(searchEdit.text?.toString().orEmpty())
+        if (isListMode) {
+            alphaListDirty = false
+            renderAlphaList(searchEdit.text?.toString().orEmpty())
+        }
+    }
+
+    fun clearSearchFocus() {
+        if (searchEdit.hasFocus()) {
+            val imm = context.getSystemService(InputMethodManager::class.java)
+            imm?.hideSoftInputFromWindow(searchEdit.windowToken, 0)
+            searchEdit.clearFocus()
+        }
     }
 
     private fun setListMode(listMode: Boolean) {
@@ -189,8 +207,17 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         toggleModeBtn.text = if (listMode) "Grid" else "A-Z"
         folderScroll.visibility = if (listMode) GONE else VISIBLE
         listContainerFrame.visibility = if (listMode) VISIBLE else GONE
-        if (!listMode) {
-            searchEdit.setText("")
+        if (listMode) {
+            if (alphaListDirty) {
+                alphaListDirty = false
+                renderAlphaList(searchEdit.text?.toString().orEmpty())
+            }
+        } else {
+            val imm = context.getSystemService(InputMethodManager::class.java)
+            imm?.hideSoftInputFromWindow(searchEdit.windowToken, 0)
+            if (searchEdit.text?.isNotEmpty() == true) {
+                searchEdit.setText("")
+            }
             searchEdit.clearFocus()
         }
     }
@@ -268,7 +295,7 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         val box = GridLayout(context).apply {
             columnCount = 2
             rowCount = 2
-            background = IosDesign.createGlassDrawable(context, 26f, 0x38F2F2F7, 0x38FFFFFF)
+            background = IosDesign.createFrostedSurface(context, 28f, 0x48F5F5FA, 0x32DCDCE6, 0x4CFFFFFF)
             val p = IosDesign.dpInt(context, 12f)
             setPadding(p, p, p, p)
         }
@@ -284,7 +311,7 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
                     classNameRef = app.className
                     showLabel = false
                     largeMode = true
-                    iconBitmap = cache.getIcon(app.packageName, app.className)
+                    iconBitmap = cache.getIcon(app.packageName, app.className, app.label)
                     setOnClickListener { onAppClick?.invoke(app, this) }
                     setOnLongClickListener {
                         onAppLongClick?.invoke(app, this)
@@ -309,12 +336,12 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
                     classNameRef = app.className
                     showLabel = false
                     largeMode = true
-                    iconBitmap = cache.getIcon(app.packageName, app.className)
+                    iconBitmap = cache.getIcon(app.packageName, app.className, app.label)
                     setOnClickListener { onAppClick?.invoke(app, this) }
                 }
             }
             apps.size > 4 -> {
-                val miniBitmaps = apps.drop(3).take(4).map { cache.getIcon(it.packageName, it.className) }
+                val miniBitmaps = apps.drop(3).take(4).map { cache.getIcon(it.packageName, it.className, it.label) }
                 MiniQuadClusterView(context, miniBitmaps).apply {
                     setOnClickListener { onOpenCategory?.invoke(title, apps) }
                 }
@@ -411,7 +438,7 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
                 }
             }
             val iv = ImageView(context).apply {
-                setImageBitmap(cache.getIcon(app.packageName, app.className))
+                setImageBitmap(cache.getIcon(app.packageName, app.className, app.label))
             }
             val iconSz = IosDesign.dpInt(context, 44f)
             row.addView(iv, LinearLayout.LayoutParams(iconSz, iconSz))

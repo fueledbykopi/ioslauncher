@@ -6,7 +6,9 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -22,6 +24,7 @@ import com.iospring.launcher.data.LauncherRepository
 import com.iospring.launcher.model.IconSizeMode
 import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.model.LauncherPreferences
+import com.iospring.launcher.service.LauncherKeepAliveService
 
 /**
  * Clean iOS 18 Grouped Settings interface for iOSpring.
@@ -66,6 +69,11 @@ class SettingsActivity : ComponentActivity() {
         super.onResume()
         prefs = repository.loadPreferences()
         renderSettings()
+    }
+
+    override fun onDestroy() {
+        repository.close()
+        super.onDestroy()
     }
 
     private fun renderSettings() {
@@ -123,8 +131,24 @@ class SettingsActivity : ComponentActivity() {
         }
         iconCard.addView(createDivider())
         iconCard.addView(createSwitchRow(
+            title = "Built-in iOS Icon Pack",
+            subtitle = "Custom iOS 18 vector icons for popular apps",
+            checked = prefs.iosIconPackEnabled
+        ) { checked ->
+            updatePrefs(prefs.copy(iosIconPackEnabled = checked))
+        })
+        iconCard.addView(createDivider())
+        iconCard.addView(createSwitchRow(
+            title = "Show App Labels",
+            subtitle = "Show app name text below icons (default on)",
+            checked = prefs.showAppLabels
+        ) { checked ->
+            updatePrefs(prefs.copy(showAppLabels = checked))
+        })
+        iconCard.addView(createDivider())
+        iconCard.addView(createSwitchRow(
             title = "Large Icons",
-            subtitle = "Enlarge icons & hide app labels (iOS 18)",
+            subtitle = "Enlarge squircle icons on Home Screen",
             checked = prefs.iconSizeMode == IconSizeMode.LARGE
         ) { checked ->
             updatePrefs(prefs.copy(iconSizeMode = if (checked) IconSizeMode.LARGE else IconSizeMode.STANDARD))
@@ -201,9 +225,18 @@ class SettingsActivity : ComponentActivity() {
         })
         rootColumn.addView(privacyCard)
 
-        // 5. OPPO Android 15 (ColorOS 15) Optimization
-        rootColumn.addView(createSectionHeader("OPPO ANDROID 15 (COLOROS 15)"))
+        // 5. Memory Residency & OPPO Android 15 (ColorOS 15) Optimization
+        rootColumn.addView(createSectionHeader("MEMORY & OPPO COLOROS 15"))
         val oppoCard = createGroupCard()
+        oppoCard.addView(createSwitchRow(
+            title = "Keep Launcher in RAM",
+            subtitle = "Low-memory persistent service prevents OS from killing launcher",
+            checked = prefs.keepInRamEnabled
+        ) { checked ->
+            updatePrefs(prefs.copy(keepInRamEnabled = checked))
+            LauncherKeepAliveService.syncState(this, checked)
+        })
+        oppoCard.addView(createDivider())
         oppoCard.addView(createSwitchRow(
             title = "ColorOS 15 Gesture Safe Zone",
             subtitle = "Protect bottom Home/Recents bar & side Back edges",
@@ -212,12 +245,13 @@ class SettingsActivity : ComponentActivity() {
             updatePrefs(prefs.copy(colorOsGestureSafeZone = it))
         })
         oppoCard.addView(createDivider())
+        val isUnrestricted = isIgnoringBatteryOptimizations()
         oppoCard.addView(createActionRow(
-            title = "Battery Optimization",
-            subtitle = "Recommended: Allow background activity for instant Home resume",
-            accentColor = IosDesign.IOS_BLUE
+            title = if (isUnrestricted) "Battery Optimization Unrestricted ✓" else "Allow Unrestricted Background Battery",
+            subtitle = if (isUnrestricted) "Protected from background memory kills" else "Tap to whitelist iOSpring so Android never kills it",
+            accentColor = if (isUnrestricted) IosDesign.IOS_GREEN else IosDesign.IOS_BLUE
         ) {
-            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+            requestUnrestrictedBattery()
         })
         rootColumn.addView(oppoCard)
 
@@ -345,6 +379,22 @@ class SettingsActivity : ComponentActivity() {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
         val res = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
         return res?.activityInfo?.packageName == packageName
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        val pm = getSystemService(PowerManager::class.java)
+        return pm?.isIgnoringBatteryOptimizations(packageName) == true
+    }
+
+    private fun requestUnrestrictedBattery() {
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        }
     }
 
     // -------------------------------------------------------------------------

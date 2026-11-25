@@ -59,6 +59,27 @@ object IosDesign {
         }
     }
 
+    /**
+     * Multi-stop iOS 18 liquid frosted glass surface with top luminous sheen and crisp specular rim.
+     */
+    fun createFrostedSurface(
+        context: Context,
+        cornerRadiusDp: Float,
+        topFillColor: Int = 0x56F5F5FA,
+        bottomFillColor: Int = 0x36D8D8E2,
+        strokeColor: Int = 0x54FFFFFF,
+        strokeWidthDp: Float = 0.9f
+    ): GradientDrawable {
+        return GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(topFillColor, bottomFillColor)
+        ).apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(context, cornerRadiusDp)
+            setStroke(dpInt(context, strokeWidthDp).coerceAtLeast(1), strokeColor)
+        }
+    }
+
     fun createPillDrawable(
         context: Context,
         fillColor: Int,

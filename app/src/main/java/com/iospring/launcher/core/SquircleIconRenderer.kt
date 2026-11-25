@@ -69,20 +69,32 @@ class IconCacheManager(private val context: Context) {
     }
 
     private val density = context.resources.displayMetrics.density
-    private val iconSizePx: Int = (62f * density).toInt().coerceIn(96, 200)
+    private val iconSizePx: Int = (58f * density).toInt().coerceIn(96, 168)
 
     private val maskPath: Path = SquircleMath.createSquirclePath(
-        RectF(0f, 0f, iconSizePx.toFloat(), iconSizePx.toFloat())
+        RectF(0f, 0f, iconSizePx.toFloat(), iconSizePx.toFloat()),
+        exponent = 4.8f
     )
 
     private var themeStyle: IconThemeStyle = IconThemeStyle.LIGHT
     private var tintColor: Int = Color.parseColor("#0A84FF")
+    private var iosIconPackEnabled: Boolean = true
 
-    fun updateTheme(style: IconThemeStyle, tint: Int) {
-        if (themeStyle != style || tintColor != tint) {
+    fun updateTheme(style: IconThemeStyle, tint: Int, useIconPack: Boolean = iosIconPackEnabled) {
+        if (themeStyle != style || tintColor != tint || iosIconPackEnabled != useIconPack) {
             themeStyle = style
             tintColor = tint
+            iosIconPackEnabled = useIconPack
             cache.evictAll()
+        }
+    }
+
+    fun trimMemory(aggressive: Boolean) {
+        if (aggressive) {
+            cache.evictAll()
+        } else {
+            // Keep Home & Dock icons hot in RAM while cutting memory usage in half
+            cache.trimToSize((cache.size() / 2).coerceAtLeast(1024))
         }
     }
 
@@ -90,14 +102,35 @@ class IconCacheManager(private val context: Context) {
         cache.evictAll()
     }
 
-    fun getIcon(packageName: String, className: String): Bitmap {
-        val key = "$packageName/$className|${themeStyle.ordinal}|$tintColor"
+    fun getIcon(packageName: String, className: String, label: String = ""): Bitmap {
+        val packFlag = if (iosIconPackEnabled) 1 else 0
+        val key = "$packageName/$className|${themeStyle.ordinal}|$tintColor|$packFlag"
         cache.get(key)?.let { return it }
 
-        val drawable = loadRawDrawable(packageName, className)
-        val rendered = renderIosSquircle(drawable)
+        val rendered = if (iosIconPackEnabled) {
+            val packGlyph = IosIconPackRenderer.matchGlyph(packageName, label)
+            if (packGlyph != null) {
+                renderBuiltInPackSquircle(packGlyph)
+            } else {
+                renderIosSquircle(loadRawDrawable(packageName, className))
+            }
+        } else {
+            renderIosSquircle(loadRawDrawable(packageName, className))
+        }
         cache.put(key, rendered)
         return rendered
+    }
+
+    private fun renderBuiltInPackSquircle(glyph: IosIconPackRenderer.IconGlyph): Bitmap {
+        val size = iconSizePx
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val saveCount = canvas.save()
+        canvas.clipPath(maskPath)
+        IosIconPackRenderer.drawPackIcon(canvas, size, glyph, themeStyle, tintColor)
+        drawSpecularRim(canvas, size)
+        canvas.restoreToCount(saveCount)
+        return out
     }
 
     private fun loadRawDrawable(packageName: String, className: String): Drawable? {
@@ -130,20 +163,23 @@ class IconCacheManager(private val context: Context) {
             IconThemeStyle.TINTED -> drawTintedIcon(canvas, raw, size, tintColor)
         }
 
-        // Subtle iOS specular inner glass edge highlight
+        drawSpecularRim(canvas, size)
+        canvas.restoreToCount(saveCount)
+        return out
+    }
+
+    private fun drawSpecularRim(canvas: Canvas, size: Int) {
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = (1.1f * density).coerceAtLeast(1f)
+            strokeWidth = (1.15f * density).coerceAtLeast(1f)
             shader = LinearGradient(
                 0f, 0f, 0f, size.toFloat(),
-                if (themeStyle == IconThemeStyle.LIGHT) 0x40FFFFFF else 0x30FFFFFF,
-                0x14000000,
+                if (themeStyle == IconThemeStyle.LIGHT) 0x4CFFFFFF else 0x36FFFFFF,
+                0x16000000,
                 Shader.TileMode.CLAMP
             )
         }
         canvas.drawPath(maskPath, borderPaint)
-        canvas.restoreToCount(saveCount)
-        return out
     }
 
     private fun drawLightIcon(canvas: Canvas, raw: Drawable?, size: Int) {

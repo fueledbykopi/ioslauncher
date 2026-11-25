@@ -35,7 +35,9 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
     var onEmptyLongPress: (() -> Unit)? = null
     var onEmptyTap: (() -> Unit)? = null
 
-    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val viewConfig = ViewConfiguration.get(context)
+    private val touchSlop = viewConfig.scaledTouchSlop
+    private val maxFlingVelocity = viewConfig.scaledMaximumFlingVelocity.toFloat()
     private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
 
     private var currentPage: Int = 0
@@ -43,7 +45,9 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
     private var downX: Float = 0f
     private var downY: Float = 0f
     private var lastX: Float = 0f
+    private var activePointerId: Int = MotionEvent.INVALID_POINTER_ID
     private var gestureIgnoredBySystemZone: Boolean = false
+    private var dragInterruptedSpring: Boolean = false
     private var mode: DragMode = DragMode.NONE
     private var velocityTracker: VelocityTracker? = null
     private var longPressPending: Boolean = false
@@ -79,16 +83,48 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
     }
 
     fun setPages(pages: List<View>, initialPage: Int = 0) {
-        spring.cancel()
+        resetTouchState(snapToCurrentPage = false)
         removeAllViews()
         pages.forEach { addView(it, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)) }
         currentPage = initialPage.coerceIn(0, (childCount - 1).coerceAtLeast(0))
         requestLayout()
         post {
-            if (width > 0) {
+            if (width > 0 && childCount > 0) {
+                currentPage = currentPage.coerceIn(0, childCount - 1)
                 spring.snapTo(currentPage * width.toFloat())
                 onPageSettled?.invoke(currentPage)
             }
+        }
+    }
+
+    /**
+     * Inserts a page without removing/detaching existing pages (safe during active item drag).
+     */
+    fun insertPage(index: Int, page: View) {
+        val clampedIndex = index.coerceIn(0, childCount)
+        addView(page, clampedIndex, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        if (clampedIndex <= currentPage) {
+            currentPage = (currentPage + 1).coerceIn(0, childCount - 1)
+        }
+        requestLayout()
+    }
+
+    /**
+     * Clears any in-flight gesture, velocity tracker, long-press callback, or stale drag lock.
+     * Safe to invoke on activity pause/resume or before rebuilding workspace pages.
+     */
+    fun resetTouchState(snapToCurrentPage: Boolean = true) {
+        spring.cancel()
+        cancelLongPressCheck()
+        releaseVelocityTracker()
+        mode = DragMode.NONE
+        activePointerId = MotionEvent.INVALID_POINTER_ID
+        gestureIgnoredBySystemZone = false
+        dragInterruptedSpring = false
+        isDraggingItem = false
+        if (snapToCurrentPage && width > 0 && childCount > 0) {
+            currentPage = currentPage.coerceIn(0, childCount - 1)
+            spring.snapTo(currentPage * width.toFloat())
         }
     }
 
@@ -97,8 +133,16 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
         val clamped = index.coerceIn(0, childCount - 1)
         currentPage = clamped
         val targetX = clamped * width.toFloat()
+        if (!currentScrollX.isFinite()) {
+            currentScrollX = targetX
+        }
         if (animate) {
-            spring.animateTo(targetX, initialVelocity)
+            if (!spring.isRunning) {
+                spring.setCurrentValue(currentScrollX)
+            }
+            val safeVelocity = initialVelocity?.takeIf { it.isFinite() }
+                ?.coerceIn(-maxFlingVelocity, maxFlingVelocity)
+            spring.animateTo(targetX, safeVelocity)
         } else {
             spring.snapTo(targetX)
             onPageSettled?.invoke(currentPage)
@@ -133,17 +177,21 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
 
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                activePointerId = ev.getPointerId(0)
                 downX = ev.x
                 downY = ev.y
                 lastX = ev.x
                 mode = DragMode.NONE
+                dragInterruptedSpring = false
 
                 // Respect OPPO ColorOS 15 side Back & bottom Home/Recents gesture zones
+                val effectiveW = if (width > 0) width else resources.displayMetrics.widthPixels
+                val effectiveH = if (height > 0) height else resources.displayMetrics.heightPixels
                 gestureIgnoredBySystemZone = ColorOsCompat.isInSystemGestureZone(
-                    x = ev.rawX,
-                    y = ev.rawY,
-                    viewWidth = resources.displayMetrics.widthPixels,
-                    viewHeight = resources.displayMetrics.heightPixels,
+                    x = ev.x,
+                    y = ev.y,
+                    viewWidth = effectiveW,
+                    viewHeight = effectiveH,
                     insets = safeInsets,
                     enabled = colorOsSafeZoneEnabled
                 )
@@ -151,21 +199,28 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
 
                 if (spring.isRunning) {
                     spring.cancel()
+                    dragInterruptedSpring = true
                 }
-                velocityTracker?.recycle()
+                releaseVelocityTracker()
                 velocityTracker = VelocityTracker.obtain().apply { addMovement(ev) }
             }
 
             MotionEvent.ACTION_MOVE -> {
                 if (gestureIgnoredBySystemZone) return false
-                val dx = ev.x - downX
-                val dy = ev.y - downY
+                val pointerIdx = ev.findPointerIndex(activePointerId)
+                if (pointerIdx < 0) return false
+                velocityTracker?.addMovement(ev)
+
+                val x = ev.getX(pointerIdx)
+                val y = ev.getY(pointerIdx)
+                val dx = x - downX
+                val dy = y - downY
                 val absDx = abs(dx)
                 val absDy = abs(dy)
 
                 if (absDx > touchSlop && absDx > absDy * 1.15f) {
                     mode = DragMode.HORIZONTAL
-                    lastX = ev.x
+                    lastX = x
                     cancelLongPressCheck()
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
@@ -185,9 +240,18 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
                 }
             }
 
+            MotionEvent.ACTION_POINTER_UP -> {
+                onSecondaryPointerUp(ev)
+            }
+
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 mode = DragMode.NONE
+                activePointerId = MotionEvent.INVALID_POINTER_ID
                 releaseVelocityTracker()
+                if (dragInterruptedSpring) {
+                    dragInterruptedSpring = false
+                    scrollToPage(currentPage, animate = true)
+                }
             }
         }
         return false
@@ -196,13 +260,18 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (isDraggingItem || gestureIgnoredBySystemZone) return false
 
+        val action = event.actionMasked
         if (velocityTracker == null) {
             velocityTracker = VelocityTracker.obtain()
+            velocityTracker?.addMovement(event)
+        } else if (action != MotionEvent.ACTION_DOWN) {
+            // Avoid double-recording ACTION_DOWN already added in onInterceptTouchEvent
+            velocityTracker?.addMovement(event)
         }
-        velocityTracker?.addMovement(event)
 
-        when (event.actionMasked) {
+        when (action) {
             MotionEvent.ACTION_DOWN -> {
+                activePointerId = event.getPointerId(0)
                 downX = event.x
                 downY = event.y
                 lastX = event.x
@@ -212,8 +281,16 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
             }
 
             MotionEvent.ACTION_MOVE -> {
-                val dxTotal = event.x - downX
-                val dyTotal = event.y - downY
+                var pointerIdx = event.findPointerIndex(activePointerId)
+                if (pointerIdx < 0) {
+                    activePointerId = event.getPointerId(0)
+                    pointerIdx = 0
+                    lastX = event.getX(0)
+                }
+                val x = event.getX(pointerIdx)
+                val y = event.getY(pointerIdx)
+                val dxTotal = x - downX
+                val dyTotal = y - downY
                 if (abs(dxTotal) > touchSlop || abs(dyTotal) > touchSlop) {
                     cancelLongPressCheck()
                 }
@@ -221,16 +298,23 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
                 if (mode == DragMode.NONE) {
                     if (abs(dxTotal) > touchSlop && abs(dxTotal) > abs(dyTotal)) {
                         mode = DragMode.HORIZONTAL
-                        lastX = event.x
-                    } else if (swipeDownSpotlightEnabled && dyTotal > touchSlop * 1.4f && abs(dyTotal) > abs(dxTotal) * 1.3f) {
+                        lastX = x
+                    } else if (swipeDownSpotlightEnabled &&
+                        dyTotal > touchSlop * 1.4f &&
+                        abs(dyTotal) > abs(dxTotal) * 1.3f &&
+                        !canActivePageScrollUp()
+                    ) {
                         mode = DragMode.SPOTLIGHT_DOWN
                     }
                 }
 
                 when (mode) {
                     DragMode.HORIZONTAL -> {
-                        val delta = lastX - event.x
-                        lastX = event.x
+                        if (!currentScrollX.isFinite()) {
+                            currentScrollX = currentPage * width.toFloat()
+                        }
+                        val delta = lastX - x
+                        lastX = x
                         val maxScroll = ((childCount - 1).coerceAtLeast(0) * width).toFloat()
                         var next = currentScrollX + delta
                         // UIScrollView rubber-band resistance past first/last page
@@ -239,15 +323,20 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
                         } else if (next > maxScroll) {
                             next = maxScroll + SpringMath.rubberBand(next - maxScroll, width.toFloat(), 0.50f)
                         }
-                        currentScrollX = next
+                        currentScrollX = if (next.isFinite()) next else currentPage * width.toFloat()
                         applyScrollTranslation()
                     }
                     DragMode.SPOTLIGHT_DOWN -> {
-                        val pull = (event.y - downY).coerceAtLeast(0f)
+                        val pull = (y - downY).coerceAtLeast(0f)
                         onSwipeDownSpotlight?.invoke(pull, false)
                     }
                     DragMode.NONE -> Unit
                 }
+                return true
+            }
+
+            MotionEvent.ACTION_POINTER_UP -> {
+                onSecondaryPointerUp(event)
                 return true
             }
 
@@ -257,23 +346,34 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
 
                 when (mode) {
                     DragMode.HORIZONTAL -> {
-                        velocityTracker?.computeCurrentVelocity(1000)
-                        val vx = velocityTracker?.xVelocity ?: 0f
+                        velocityTracker?.computeCurrentVelocity(1000, maxFlingVelocity)
+                        val rawVx = if (activePointerId != MotionEvent.INVALID_POINTER_ID) {
+                            velocityTracker?.getXVelocity(activePointerId) ?: 0f
+                        } else {
+                            velocityTracker?.xVelocity ?: 0f
+                        }
+                        val vx = if (rawVx.isFinite()) rawVx.coerceIn(-maxFlingVelocity, maxFlingVelocity) else 0f
                         val target = computeTargetPage(vx)
+                        spring.setCurrentValue(currentScrollX)
                         scrollToPage(target, animate = true, initialVelocity = -vx)
                     }
                     DragMode.SPOTLIGHT_DOWN -> {
-                        val pull = (event.y - downY).coerceAtLeast(0f)
+                        val pointerIdx = event.findPointerIndex(activePointerId).let { if (it >= 0) it else 0 }
+                        val pull = (event.getY(pointerIdx) - downY).coerceAtLeast(0f)
                         val threshold = IosDesign.dp(context, 72f)
-                        onSwipeDownSpotlight?.invoke(pull, pull >= threshold)
+                        onSwipeDownSpotlight?.invoke(pull, action == MotionEvent.ACTION_UP && pull >= threshold)
                     }
                     DragMode.NONE -> {
-                        if (event.actionMasked == MotionEvent.ACTION_UP && wasLongPressPending) {
+                        if (dragInterruptedSpring) {
+                            scrollToPage(currentPage, animate = true)
+                        } else if (action == MotionEvent.ACTION_UP && wasLongPressPending) {
                             onEmptyTap?.invoke()
                         }
                     }
                 }
                 mode = DragMode.NONE
+                activePointerId = MotionEvent.INVALID_POINTER_ID
+                dragInterruptedSpring = false
                 releaseVelocityTracker()
                 return true
             }
@@ -281,10 +381,25 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
         return super.onTouchEvent(event)
     }
 
+    private fun onSecondaryPointerUp(ev: MotionEvent) {
+        val pointerIdx = ev.actionIndex
+        val pointerId = ev.getPointerId(pointerIdx)
+        if (pointerId == activePointerId) {
+            val newIdx = if (pointerIdx == 0) 1 else 0
+            if (newIdx < ev.pointerCount) {
+                activePointerId = ev.getPointerId(newIdx)
+                lastX = ev.getX(newIdx)
+                downX = ev.getX(newIdx)
+                downY = ev.getY(newIdx)
+            }
+        }
+    }
+
     private fun computeTargetPage(velocityX: Float): Int {
         if (width <= 0 || childCount <= 1) return 0
         val flingThreshold = IosDesign.dp(context, 380f)
-        val rawPage = currentScrollX / width.toFloat()
+        val safeScroll = if (currentScrollX.isFinite()) currentScrollX else currentPage * width.toFloat()
+        val rawPage = safeScroll / width.toFloat()
         return when {
             velocityX < -flingThreshold -> (currentPage + 1).coerceAtMost(childCount - 1)
             velocityX > flingThreshold -> (currentPage - 1).coerceAtLeast(0)
@@ -298,8 +413,22 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
     }
 
     private fun applyScrollTranslation() {
+        if (!currentScrollX.isFinite()) {
+            currentScrollX = currentPage * width.toFloat()
+        }
         scrollTo(currentScrollX.toInt(), 0)
         if (width > 0) {
+            val w = width.toFloat()
+            for (i in 0 until childCount) {
+                val child = getChildAt(i)
+                val dist = abs(currentScrollX - i * w) / w
+                val clamped = dist.coerceIn(0f, 1f)
+                // Subtle iOS SpringBoard depth scale on gliding pages (zero allocations)
+                val scale = 1f - clamped * 0.025f
+                child.scaleX = scale
+                child.scaleY = scale
+                child.alpha = 1f - clamped * 0.14f
+            }
             onScrollProgress?.invoke(currentScrollX, width, childCount)
         }
     }
