@@ -541,7 +541,7 @@ object IosIconPackRenderer {
             IconThemeStyle.DARK -> 0xFF1C1C1E.toInt()
             IconThemeStyle.TINTED -> 0xFF18181C.toInt()
         }
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bodyColor; style = Paint.Style.FILL }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bodyColor; this.style = Paint.Style.FILL }
         // Top viewfinder bump
         canvas.drawRoundRect(RectF(s * 0.35f, s * 0.24f, s * 0.65f, s * 0.36f), s * 0.06f, s * 0.06f, paint)
         // Camera body
@@ -549,7 +549,7 @@ object IosIconPackRenderer {
         // Lens outer ring
         val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = innerColor
-            style = Paint.Style.STROKE
+            this.style = Paint.Style.STROKE
             strokeWidth = s * 0.045f
         }
         canvas.drawCircle(s * 0.50f, s * 0.54f, s * 0.15f, ringPaint)
@@ -657,13 +657,13 @@ object IosIconPackRenderer {
         }
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = gearColor
-            style = Paint.Style.STROKE
+            this.style = Paint.Style.STROKE
             strokeWidth = s * 0.085f
         }
         canvas.drawCircle(cx, cy, s * 0.23f, paint)
         val tooth = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = gearColor
-            style = Paint.Style.FILL
+            this.style = Paint.Style.FILL
         }
         for (i in 0 until 12) {
             canvas.save()
@@ -676,7 +676,7 @@ object IosIconPackRenderer {
         }
         canvas.drawCircle(cx, cy, s * 0.11f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = gearColor
-            style = Paint.Style.STROKE
+            this.style = Paint.Style.STROKE
             strokeWidth = s * 0.032f
         })
     }
@@ -1040,7 +1040,7 @@ object IosIconPackRenderer {
             lineTo(s * 0.47f, s * 0.46f)
             close()
         }
-        canvas.drawPath(bolt, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF2B6BFF.toInt() })
+        canvas.drawPath(bolt, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0xFF2B6BFF.toInt() })
     }
 
     private fun drawDiscordMark(canvas: Canvas, s: Float, color: Int) {
