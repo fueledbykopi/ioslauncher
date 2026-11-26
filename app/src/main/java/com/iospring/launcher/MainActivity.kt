@@ -254,9 +254,11 @@ class MainActivity : ComponentActivity() {
                 pager.colorOsSafeZoneEnabled = prefs.colorOsGestureSafeZone
                 pager.swipeDownSpotlightEnabled = prefs.swipeDownSpotlight
                 applyGlassThemeToChrome()
-                repository.reconcileWithInstalledApps(workspace, installedApps, prefs)
-                if (arrangeEnabledNow) {
-                    repository.saveWorkspaceAsync(workspace)
+                if (installedApps.isNotEmpty()) {
+                    repository.reconcileWithInstalledApps(workspace, installedApps, prefs)
+                    if (arrangeEnabledNow) {
+                        repository.saveWorkspaceAsync(workspace)
+                    }
                 }
                 pendingWorkspaceRebuild = false
                 rebuildWorkspacePages(preserveCurrentPage = !modeChanged)
@@ -815,6 +817,16 @@ class MainActivity : ComponentActivity() {
         } else {
             currentHomePageOffset
         }
+        val onHomePage = targetPage in currentHomePageOffset until (currentHomePageOffset + count)
+        val chromeVis = if (onHomePage) View.VISIBLE else View.INVISIBLE
+        val chromeAlpha = if (onHomePage) 1f else 0f
+        dockView.visibility = chromeVis
+        dockView.alpha = chromeAlpha
+        dockView.isClickable = onHomePage
+        searchPill.visibility = chromeVis
+        searchPill.alpha = chromeAlpha
+        searchPill.isClickable = onHomePage
+
         pager.setPages(pages, initialPage = targetPage)
         searchPill.totalHomePages = count
         searchPill.showSearchLabel = prefs.showSearchPill
@@ -1702,12 +1714,20 @@ class MainActivity : ComponentActivity() {
             else -> 1f
         }
         val visible = alphaFactor > 0.02f
+        val wasDockGone = dockView.visibility == View.GONE
+        val wasPillGone = searchPill.visibility == View.GONE
         dockView.alpha = alphaFactor
         searchPill.alpha = alphaFactor
         dockView.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         searchPill.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         dockView.isClickable = alphaFactor > 0.5f
         searchPill.isClickable = alphaFactor > 0.5f
+        if (visible && (wasDockGone || wasPillGone)) {
+            workspaceBlurContainer.post {
+                dockView.requestLayout()
+                searchPill.requestLayout()
+            }
+        }
     }
 
     private fun updateWindowWallpaperBlur(activePageIndex: Int = pager.activePageIndex) {

@@ -108,6 +108,8 @@ class IosDockView(context: Context) : FrameLayout(context) {
             val lp = LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1f)
             iconsRow.addView(iconView, lp)
         }
+        iconsRow.requestLayout()
+        requestLayout()
     }
 
     fun refreshBadges(showBadges: Boolean) {
