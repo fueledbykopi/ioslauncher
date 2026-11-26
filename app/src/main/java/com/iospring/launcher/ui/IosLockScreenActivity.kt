@@ -127,7 +127,7 @@ class IosLockScreenActivity : ComponentActivity() {
         prefs = repository.loadPreferences()
         val vc = ViewConfiguration.get(this)
         touchSlop = vc.scaledTouchSlop
-        doubleTapSlop = vc.scaledDoubleTapSlop
+        doubleTapSlop = IosDesign.dpInt(this, 64f)
         doubleTapTimeoutMs = ViewConfiguration.getDoubleTapTimeout().toLong()
 
         buildLockUi()
@@ -466,33 +466,33 @@ class IosLockScreenActivity : ComponentActivity() {
                 if (isPreviewMode) {
                     onUnlocked?.invoke()
                     finishWithoutAnimation()
-                    return@withEndAction
-                }
-                val km = getSystemService(KeyguardManager::class.java)
-                if (km != null && km.isKeyguardLocked) {
-                    km.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
-                        override fun onDismissSucceeded() {
-                            onUnlocked?.invoke()
-                            finishWithoutAnimation()
-                        }
-
-                        override fun onDismissCancelled() {
-                            isUnlocking = false
-                            contentLayer.translationY = 0f
-                            contentLayer.alpha = 1f
-                            contentLayer.scaleX = 1f
-                            contentLayer.scaleY = 1f
-                            lockGlyphView.unlockProgress = 0f
-                        }
-
-                        override fun onDismissError() {
-                            onUnlocked?.invoke()
-                            finishWithoutAnimation()
-                        }
-                    })
                 } else {
-                    onUnlocked?.invoke()
-                    finishWithoutAnimation()
+                    val km = getSystemService(KeyguardManager::class.java)
+                    if (km != null && km.isKeyguardLocked) {
+                        km.requestDismissKeyguard(this@IosLockScreenActivity, object : KeyguardManager.KeyguardDismissCallback() {
+                            override fun onDismissSucceeded() {
+                                onUnlocked?.invoke()
+                                finishWithoutAnimation()
+                            }
+
+                            override fun onDismissCancelled() {
+                                isUnlocking = false
+                                contentLayer.translationY = 0f
+                                contentLayer.alpha = 1f
+                                contentLayer.scaleX = 1f
+                                contentLayer.scaleY = 1f
+                                lockGlyphView.unlockProgress = 0f
+                            }
+
+                            override fun onDismissError() {
+                                onUnlocked?.invoke()
+                                finishWithoutAnimation()
+                            }
+                        })
+                    } else {
+                        onUnlocked?.invoke()
+                        finishWithoutAnimation()
+                    }
                 }
             }
             .start()

@@ -61,7 +61,7 @@ class ScreenLockAccessibilityService : AccessibilityService() {
         fun lockScreenNow(): Boolean {
             val svc = instanceRef?.get() ?: return false
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                runCatching { svc.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN) }.getOrDefault(false)
+                runCatching { svc.performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN) }.getOrDefault(false)
             } else {
                 false
             }

@@ -39,7 +39,7 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
 
     private val viewConfig = ViewConfiguration.get(context)
     private val touchSlop = viewConfig.scaledTouchSlop
-    private val doubleTapSlop = viewConfig.scaledDoubleTapSlop
+    private val doubleTapSlop = IosDesign.dpInt(context, 64f)
     private val doubleTapTimeoutMs = ViewConfiguration.getDoubleTapTimeout().toLong()
     private val maxFlingVelocity = viewConfig.scaledMaximumFlingVelocity.toFloat()
     private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
