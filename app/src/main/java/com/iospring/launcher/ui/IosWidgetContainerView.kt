@@ -3,12 +3,14 @@ package com.iospring.launcher.ui
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.appwidget.AppWidgetHostView
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Outline
 import android.graphics.Paint
 import android.os.Build
 import android.os.Bundle
+import android.util.SizeF
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -115,24 +117,27 @@ class IosWidgetContainerView(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (contentView is AppWidgetHostView && w > 0 && h > 0) {
+        val hostView = contentView as? AppWidgetHostView ?: return
+        if (w > 0 && h > 0) {
             val density = resources.displayMetrics.density.coerceAtLeast(1f)
             val pad = paddingLeft + paddingRight
             val dpW = ((w - pad) / density).toInt().coerceAtLeast(40)
             val dpH = ((h - pad) / density).toInt().coerceAtLeast(40)
-            runCatching {
+            try {
                 val opts = Bundle().apply {
-                    putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, dpW)
-                    putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, dpW)
-                    putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, dpH)
-                    putInt(android.appwidget.AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, dpH)
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, dpW)
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, dpW)
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, dpH)
+                    putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, dpH)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    contentView.updateAppWidgetSize(opts, listOf(android.util.SizeF(dpW.toFloat(), dpH.toFloat())))
+                    hostView.updateAppWidgetSize(opts, listOf(SizeF(dpW.toFloat(), dpH.toFloat())))
                 } else {
                     @Suppress("DEPRECATION")
-                    contentView.updateAppWidgetSize(opts, dpW, dpH, dpW, dpH)
+                    hostView.updateAppWidgetSize(opts, dpW, dpH, dpW, dpH)
                 }
+            } catch (_: Exception) {
+                // Ignore provider-side widget resize errors
             }
         }
     }
@@ -173,7 +178,8 @@ class IosWidgetContainerView(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (isJiggling) {
-            return onJiggleTouch?.invoke(this, event) == true || true
+            onJiggleTouch?.invoke(this, event)
+            return true
         }
         when (event.actionMasked) {
             MotionEvent.ACTION_MOVE -> {
