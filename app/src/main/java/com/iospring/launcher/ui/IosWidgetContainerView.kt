@@ -175,9 +175,16 @@ class IosWidgetContainerView(
         if (isJiggling) {
             return onJiggleTouch?.invoke(this, event) == true || true
         }
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-            cancelLongPressCheck()
-            longPressTriggered = false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                if (longPressPending && (abs(event.x - downX) > touchSlop || abs(event.y - downY) > touchSlop)) {
+                    cancelLongPressCheck()
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                cancelLongPressCheck()
+                longPressTriggered = false
+            }
         }
         return true
     }

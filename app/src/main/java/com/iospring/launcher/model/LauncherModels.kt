@@ -125,21 +125,6 @@ data class DockSlot(
     val componentKey: String get() = "$packageName/$className"
 }
 
-enum class LockClockStyle(val label: String) {
-    LIQUID_GLASS("Liquid Glass (iOS 26)"),
-    BOLD_CLASSIC("Bold SF (iOS 18)"),
-    THIN_ELEGANT("Thin Minimal")
-}
-
-data class LockNotificationItem(
-    val key: String,
-    val packageName: String,
-    val appName: String,
-    val title: String,
-    val text: String,
-    val postTime: Long
-)
-
 data class LauncherPreferences(
     val gridCols: Int = 4,
     val gridRows: Int = 6,
@@ -160,9 +145,6 @@ data class LauncherPreferences(
     val autoArrangeIcons: Boolean = true,
     val cleanModeEnabled: Boolean = false,
     val doubleTapToLockEnabled: Boolean = true,
-    val iosLockScreenEnabled: Boolean = false,
-    val lockScreenClockStyle: LockClockStyle = LockClockStyle.LIQUID_GLASS,
-    val lockScreenShowNotifications: Boolean = true,
     val colorOsGestureSafeZone: Boolean = true,
     val hiddenPackages: Set<String> = emptySet(),
     val lockedPackages: Set<String> = emptySet()

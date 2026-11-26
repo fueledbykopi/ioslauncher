@@ -19,7 +19,6 @@ import com.iospring.launcher.model.IconSizeMode
 import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.model.LauncherPreferences
 import com.iospring.launcher.model.LauncherWorkspaceState
-import com.iospring.launcher.model.LockClockStyle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -252,11 +251,9 @@ class IospringCoreTest {
         assertTrue(defaults.autoArrangeIcons)
         assertFalse(defaults.cleanModeEnabled)
         assertTrue(defaults.doubleTapToLockEnabled)
-        assertFalse(defaults.iosLockScreenEnabled)
         assertEquals(IconThemeStyle.DARK, defaults.iconThemeStyle)
         assertEquals(GlassThemeStyle.LIQUID_GLASS, defaults.glassThemeStyle)
         assertEquals(IconSizeMode.LARGE, defaults.iconSizeMode)
-        assertEquals(LockClockStyle.LIQUID_GLASS, defaults.lockScreenClockStyle)
         assertTrue(GlassThemeStyle.entries.contains(GlassThemeStyle.FROSTED_GLASS))
         assertTrue(GlassThemeStyle.entries.contains(GlassThemeStyle.FROSTED_BLUR))
     }

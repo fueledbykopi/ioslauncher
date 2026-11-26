@@ -21,7 +21,11 @@ import java.util.Locale
  * Leftmost iOS 18+ Today View (Widget Page).
  * Swipe right from Home Page 0 to view glanceable iOS widgets and quick settings.
  */
-class IosTodayViewPage(context: Context) : ScrollView(context) {
+class IosTodayViewPage(
+    context: Context,
+    glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS,
+    iconStyle: IconThemeStyle = IconThemeStyle.DARK
+) : ScrollView(context) {
 
     var onOpenSettings: (() -> Unit)? = null
     var onAddWidget: (() -> Unit)? = null
@@ -59,8 +63,9 @@ class IosTodayViewPage(context: Context) : ScrollView(context) {
             orientation = LinearLayout.HORIZONTAL
         }
         val widgetSize = IosDesign.dpInt(context, 162f)
-        val clockWidget = IosClockWidgetView(context).also { refreshables.add(it) }
-        val calWidget = IosCalendarWidgetView(context).also { refreshables.add(it) }
+        val isDark = iconStyle != IconThemeStyle.LIGHT || glassStyle == GlassThemeStyle.OBSIDIAN_GLASS
+        val clockWidget = IosClockWidgetView(context, preferDark = isDark, glassStyle = glassStyle).also { refreshables.add(it) }
+        val calWidget = IosCalendarWidgetView(context, isDark = isDark, glassStyle = glassStyle, iconStyle = iconStyle).also { refreshables.add(it) }
 
         topRow.addView(clockWidget, LinearLayout.LayoutParams(0, widgetSize, 1f).apply {
             marginEnd = IosDesign.dpInt(context, 7f)
@@ -75,7 +80,7 @@ class IosTodayViewPage(context: Context) : ScrollView(context) {
         })
 
         // Device Summary 4x2
-        val statusWidget = IosQuickStatusWidgetView(context).also { refreshables.add(it) }
+        val statusWidget = IosQuickStatusWidgetView(context, glassStyle = glassStyle, iconStyle = iconStyle).also { refreshables.add(it) }
         column.addView(statusWidget, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, IosDesign.dpInt(context, 118f)
         ).apply {
@@ -83,7 +88,7 @@ class IosTodayViewPage(context: Context) : ScrollView(context) {
         })
 
         // Batteries (Phone + Bluetooth)
-        val batteryWidget = IosBatteryWidgetView(context).also { refreshables.add(it) }
+        val batteryWidget = IosBatteryWidgetView(context, glassStyle = glassStyle, iconStyle = iconStyle).also { refreshables.add(it) }
         column.addView(batteryWidget, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, IosDesign.dpInt(context, 160f)
         ).apply {

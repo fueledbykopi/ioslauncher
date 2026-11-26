@@ -15,7 +15,6 @@ import com.iospring.launcher.model.IconSizeMode
 import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.model.LauncherPreferences
 import com.iospring.launcher.model.LauncherWorkspaceState
-import com.iospring.launcher.model.LockClockStyle
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -101,7 +100,6 @@ class LauncherRepository(private val context: Context) {
             else -> GlassThemeStyle.LIQUID_GLASS
         }
         val sizeOrd = prefs.getInt(KEY_ICON_SIZE, IconSizeMode.LARGE.ordinal)
-        val lockClockOrd = prefs.getInt(KEY_LOCK_CLOCK_STYLE, LockClockStyle.LIQUID_GLASS.ordinal)
         val hiddenSet = prefs.getStringSet(KEY_HIDDEN_PACKAGES, emptySet())?.toSet() ?: emptySet()
         val lockedSet = prefs.getStringSet(KEY_LOCKED_PACKAGES, emptySet())?.toSet() ?: emptySet()
 
@@ -125,9 +123,6 @@ class LauncherRepository(private val context: Context) {
             autoArrangeIcons = prefs.getBoolean(KEY_AUTO_ARRANGE, true),
             cleanModeEnabled = prefs.getBoolean(KEY_CLEAN_MODE, false),
             doubleTapToLockEnabled = prefs.getBoolean(KEY_DOUBLE_TAP_LOCK, true),
-            iosLockScreenEnabled = prefs.getBoolean(KEY_IOS_LOCK_SCREEN, false),
-            lockScreenClockStyle = LockClockStyle.entries.getOrElse(lockClockOrd) { LockClockStyle.LIQUID_GLASS },
-            lockScreenShowNotifications = prefs.getBoolean(KEY_LOCK_NOTIFICATIONS, true),
             colorOsGestureSafeZone = prefs.getBoolean(KEY_COLOROS_SAFE, true),
             hiddenPackages = hiddenSet,
             lockedPackages = lockedSet
@@ -156,14 +151,13 @@ class LauncherRepository(private val context: Context) {
             .putBoolean(KEY_AUTO_ARRANGE, p.autoArrangeIcons)
             .putBoolean(KEY_CLEAN_MODE, p.cleanModeEnabled)
             .putBoolean(KEY_DOUBLE_TAP_LOCK, p.doubleTapToLockEnabled)
-            .putBoolean(KEY_IOS_LOCK_SCREEN, p.iosLockScreenEnabled)
-            .putInt(KEY_LOCK_CLOCK_STYLE, p.lockScreenClockStyle.ordinal)
-            .putBoolean(KEY_LOCK_NOTIFICATIONS, p.lockScreenShowNotifications)
             .putBoolean(KEY_COLOROS_SAFE, p.colorOsGestureSafeZone)
             .putStringSet(KEY_HIDDEN_PACKAGES, p.hiddenPackages)
             .putStringSet(KEY_LOCKED_PACKAGES, p.lockedPackages)
             .apply()
     }
+
+    fun getLayoutResetToken(): Long = prefs.getLong(KEY_LAYOUT_RESET_TOKEN, 0L)
 
     fun close() {
         ioExecutor.shutdown()
@@ -197,6 +191,9 @@ class LauncherRepository(private val context: Context) {
     fun resetWorkspace(installedApps: List<AppEntry>, prefs: LauncherPreferences): LauncherWorkspaceState {
         val fresh = buildDefaultIosWorkspace(installedApps, prefs)
         saveWorkspaceAsync(fresh)
+        prefs.let {
+            this.prefs.edit().putLong(KEY_LAYOUT_RESET_TOKEN, System.currentTimeMillis()).apply()
+        }
         return fresh
     }
 
@@ -388,9 +385,7 @@ class LauncherRepository(private val context: Context) {
         private const val KEY_AUTO_ARRANGE = "auto_arrange_icons"
         private const val KEY_CLEAN_MODE = "clean_mode"
         private const val KEY_DOUBLE_TAP_LOCK = "double_tap_lock"
-        private const val KEY_IOS_LOCK_SCREEN = "ios_lock_screen"
-        private const val KEY_LOCK_CLOCK_STYLE = "lock_clock_style"
-        private const val KEY_LOCK_NOTIFICATIONS = "lock_notifications"
+        private const val KEY_LAYOUT_RESET_TOKEN = "layout_reset_token"
         private const val KEY_COLOROS_SAFE = "coloros_safe"
         private const val KEY_HIDDEN_PACKAGES = "hidden_packages"
         private const val KEY_LOCKED_PACKAGES = "locked_packages"

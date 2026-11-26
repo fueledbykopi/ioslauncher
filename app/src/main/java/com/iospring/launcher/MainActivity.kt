@@ -112,6 +112,7 @@ class MainActivity : ComponentActivity() {
     private var currentHomePageOffset: Int = 0 // 1 if Today View is enabled, else 0
     private var isActivityResumed: Boolean = false
     private var returningFromSettings: Boolean = false
+    private var lastLayoutResetToken: Long = 0L
     private var wasStoppedInBackground: Boolean = false
     private var pendingWorkspaceRebuild: Boolean = false
     private var overlayBlurActive: Boolean = false
@@ -203,6 +204,7 @@ class MainActivity : ComponentActivity() {
         }
 
         prefs = repository.loadPreferences()
+        lastLayoutResetToken = repository.getLayoutResetToken()
         iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled, prefs.glassThemeStyle)
 
         buildViewHierarchy()
@@ -281,7 +283,27 @@ class MainActivity : ComponentActivity() {
         if (returningFromSettings) {
             returningFromSettings = false
             val latestPrefs = repository.loadPreferences()
-            if (latestPrefs != prefs) {
+            val resetToken = repository.getLayoutResetToken()
+            val layoutWasReset = resetToken != lastLayoutResetToken
+            if (layoutWasReset) {
+                lastLayoutResetToken = resetToken
+                // Clean up any old Android widget IDs before reloading reset layout
+                workspace.items.filterIsInstance<HomeItem.AndroidWidgetItem>().forEach {
+                    deleteAndroidWidgetHostId(it.appWidgetId)
+                }
+                prefs = latestPrefs
+                iconCache.updateTheme(
+                    prefs.iconThemeStyle,
+                    prefs.iconTintColor,
+                    prefs.iosIconPackEnabled,
+                    prefs.glassThemeStyle
+                )
+                todayViewPage = null
+                pager.colorOsSafeZoneEnabled = prefs.colorOsGestureSafeZone
+                pager.swipeDownSpotlightEnabled = prefs.swipeDownSpotlight
+                applyGlassThemeToChrome()
+                loadLauncherDataAsync()
+            } else if (latestPrefs != prefs) {
                 val themeChanged = latestPrefs.iconThemeStyle != prefs.iconThemeStyle ||
                     latestPrefs.iconTintColor != prefs.iconTintColor ||
                     latestPrefs.iosIconPackEnabled != prefs.iosIconPackEnabled ||
@@ -296,6 +318,7 @@ class MainActivity : ComponentActivity() {
                         prefs.iosIconPackEnabled,
                         prefs.glassThemeStyle
                     )
+                    todayViewPage = null
                 }
                 pager.colorOsSafeZoneEnabled = prefs.colorOsGestureSafeZone
                 pager.swipeDownSpotlightEnabled = prefs.swipeDownSpotlight
@@ -320,7 +343,7 @@ class MainActivity : ComponentActivity() {
             pendingResumeHousekeeping = null
             if (!isActivityResumed) return@Runnable
             ColorOsCompat.syncStatusBarAppearanceWithWallpaper(this@MainActivity)
-            LauncherKeepAliveService.syncState(this@MainActivity, prefs.keepInRamEnabled, prefs.iosLockScreenEnabled)
+            LauncherKeepAliveService.syncState(this@MainActivity, prefs.keepInRamEnabled)
             refreshVisibleWidgets()
             refreshBadgesInPlace()
         }
@@ -780,7 +803,7 @@ class MainActivity : ComponentActivity() {
             (existing.parent as? ViewGroup)?.removeView(existing)
             return existing
         }
-        return IosTodayViewPage(this).apply {
+        return IosTodayViewPage(this, prefs.glassThemeStyle, prefs.iconThemeStyle).apply {
             onOpenSettings = { openSettings() }
             onAddWidget = { showAddWidgetDialog() }
         }

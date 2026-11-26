@@ -131,9 +131,11 @@ class IosClockWidgetView(
         }
         canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, bgPaint)
         if (glassStyle == GlassThemeStyle.LIQUID_GLASS || glassStyle == GlassThemeStyle.FROSTED_GLASS) {
+            val stroke = IosDesign.dp(context, 1.1f)
             tickPaint.style = Paint.Style.STROKE
             tickPaint.color = if (isNight) 0x4AFFFFFF else 0x62FFFFFF
-            tickPaint.strokeWidth = IosDesign.dp(context, 1.1f)
+            tickPaint.strokeWidth = stroke
+            cardRect.inset(stroke * 0.5f, stroke * 0.5f)
             canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, tickPaint)
         }
 

@@ -25,7 +25,6 @@ import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.IconSizeMode
 import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.model.LauncherPreferences
-import com.iospring.launcher.model.LockClockStyle
 import com.iospring.launcher.service.LauncherKeepAliveService
 import com.iospring.launcher.service.ScreenLockAccessibilityService
 
@@ -231,67 +230,26 @@ class SettingsActivity : ComponentActivity() {
         homeCard.addView(createSwitchRow("Haptic Feedback", "Subtle iOS tactile feedback on taps & drags", prefs.hapticsEnabled) {
             updatePrefs(prefs.copy(hapticsEnabled = it))
         })
-        rootColumn.addView(homeCard)
-
-        // 4. iOS Lock Screen & Quick Gestures
-        rootColumn.addView(createSectionHeader("IOS LOCK SCREEN & GESTURES"))
-        val lockCard = createGroupCard()
-        lockCard.addView(createSwitchRow(
-            title = "iOS Lock Screen",
-            subtitle = "Replace default lock screen view with latest Apple iOS Liquid Glass Lock Screen",
-            checked = prefs.iosLockScreenEnabled
-        ) { checked ->
-            updatePrefs(prefs.copy(iosLockScreenEnabled = checked))
-            LauncherKeepAliveService.syncState(this, prefs.keepInRamEnabled, checked)
-            renderSettings()
-        })
-        lockCard.addView(createDivider())
-        lockCard.addView(createActionRow(
-            title = "Lock Screen Clock Style",
-            subtitle = prefs.lockScreenClockStyle.label,
-            accentColor = IosDesign.IOS_BLUE
-        ) {
-            showLockClockStylePicker()
-        })
-        lockCard.addView(createDivider())
-        lockCard.addView(createSwitchRow(
-            title = "Show Notifications on Lock Screen",
-            subtitle = "Display stacked Liquid Glass notification cards (uses Notification Access)",
-            checked = prefs.lockScreenShowNotifications
-        ) { checked ->
-            updatePrefs(prefs.copy(lockScreenShowNotifications = checked))
-        })
-        lockCard.addView(createDivider())
-        lockCard.addView(createActionRow(
-            title = "Preview iOS Lock Screen",
-            subtitle = "Test the latest iOS Lock Screen, Flashlight, Camera & swipe-up unlock now",
-            accentColor = IosDesign.IOS_BLUE
-        ) {
-            val preview = Intent(this, IosLockScreenActivity::class.java).apply {
-                putExtra(IosLockScreenActivity.EXTRA_PREVIEW, true)
-            }
-            startActivity(preview)
-        })
-        lockCard.addView(createDivider())
-        lockCard.addView(createSwitchRow(
+        homeCard.addView(createDivider())
+        homeCard.addView(createSwitchRow(
             title = "Double Tap to Screen Off",
             subtitle = "Double-tap any empty Home Screen area to turn off screen instantly",
             checked = prefs.doubleTapToLockEnabled
         ) { checked ->
             updatePrefs(prefs.copy(doubleTapToLockEnabled = checked))
         })
-        lockCard.addView(createDivider())
+        homeCard.addView(createDivider())
         val screenLockReady = ScreenLockAccessibilityService.isEnabledInSettings(this)
-        lockCard.addView(createActionRow(
+        homeCard.addView(createActionRow(
             title = if (screenLockReady) "Screen Off Service Active ✓" else "Enable Double-Tap Screen Off Service",
             subtitle = if (screenLockReady) "0% battery impact — Fingerprint & Face Unlock preserved" else "Tap to enable \"iOSpring Double-Tap Screen Off\" in Accessibility Settings",
             accentColor = if (screenLockReady) IosDesign.IOS_GREEN else IosDesign.IOS_BLUE
         ) {
             runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         })
-        rootColumn.addView(lockCard)
+        rootColumn.addView(homeCard)
 
-        // 5. Privacy & Biometric App Lock
+        // 4. Privacy & Biometric App Lock
         rootColumn.addView(createSectionHeader("PRIVACY & BIOMETRIC LOCK"))
         val privacyCard = createGroupCard()
         privacyCard.addView(createActionRow(
@@ -320,7 +278,7 @@ class SettingsActivity : ComponentActivity() {
             checked = prefs.keepInRamEnabled
         ) { checked ->
             updatePrefs(prefs.copy(keepInRamEnabled = checked))
-            LauncherKeepAliveService.syncState(this, checked, prefs.iosLockScreenEnabled)
+            LauncherKeepAliveService.syncState(this, checked)
         })
         oppoCard.addView(createDivider())
         oppoCard.addView(createSwitchRow(
@@ -366,19 +324,6 @@ class SettingsActivity : ComponentActivity() {
             .setTitle("Apple Glass Theme")
             .setSingleChoiceItems(names, prefs.glassThemeStyle.ordinal) { dlg, which ->
                 updatePrefs(prefs.copy(glassThemeStyle = styles[which]))
-                dlg.dismiss()
-                renderSettings()
-            }
-            .show()
-    }
-
-    private fun showLockClockStylePicker() {
-        val styles = LockClockStyle.entries
-        val names = styles.map { it.label }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("Lock Screen Clock Style")
-            .setSingleChoiceItems(names, prefs.lockScreenClockStyle.ordinal) { dlg, which ->
-                updatePrefs(prefs.copy(lockScreenClockStyle = styles[which]))
                 dlg.dismiss()
                 renderSettings()
             }

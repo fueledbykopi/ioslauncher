@@ -58,17 +58,6 @@
             android:label="@string/settings_title"
             android:theme="@style/Theme.IOSpring.Settings" />
 
-        <activity
-            android:name=".ui.IosLockScreenActivity"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|density"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:launchMode="singleTop"
-            android:screenOrientation="nosensor"
-            android:showWhenLocked="true"
-            android:taskAffinity="com.iospring.launcher.lockscreen"
-            android:theme="@style/Theme.IOSpring.LockScreen" />
-
         <service
             android:name=".service.LauncherKeepAliveService"
             android:exported="false"
