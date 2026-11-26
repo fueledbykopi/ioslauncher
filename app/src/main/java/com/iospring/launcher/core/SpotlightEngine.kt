@@ -16,17 +16,18 @@ object SpotlightEngine {
         hiddenPackages: Set<String>,
         usageScores: Map<String, Long>
     ): SpotlightResult {
-        val visibleApps = allApps.filterNot { it.packageName in hiddenPackages }
         val trimmed = query.trim()
 
-        val suggested = visibleApps
-            .sortedWith(
-                compareByDescending<AppEntry> { usageScores[it.componentKey] ?: 0L }
-                    .thenBy { it.label.lowercase() }
-            )
-            .take(8)
-
         if (trimmed.isEmpty()) {
+            val suggested = allApps
+                .asSequence()
+                .filterNot { it.packageName in hiddenPackages }
+                .sortedWith(
+                    compareByDescending<AppEntry> { usageScores[it.componentKey] ?: 0L }
+                        .thenBy { it.lowerLabel }
+                )
+                .take(8)
+                .toList()
             return SpotlightResult(
                 suggestedApps = suggested,
                 matchedApps = emptyList()
@@ -34,49 +35,92 @@ object SpotlightEngine {
         }
 
         val mathResult = evaluateMathExpression(trimmed)
-
         val lowerQuery = trimmed.lowercase()
-        val scored = visibleApps.mapNotNull { app ->
-            val score = matchScore(app.label.lowercase(), app.packageName.lowercase(), lowerQuery)
-            if (score > 0) Pair(app, score + ((usageScores[app.componentKey] ?: 0L).coerceAtMost(50L).toInt()))
-            else null
-        }.sortedWith(
+        val isT9Query = lowerQuery.length >= 2 && lowerQuery.all { it in '2'..'9' }
+
+        val scored = ArrayList<Pair<AppEntry, Int>>(16)
+        for (i in allApps.indices) {
+            val app = allApps[i]
+            if (app.packageName in hiddenPackages) continue
+            val score = matchScore(app.lowerLabel, app.lowerPackage, lowerQuery, isT9Query)
+            if (score > 0) {
+                val boost = (usageScores[app.componentKey] ?: 0L).coerceAtMost(50L).toInt()
+                scored.add(Pair(app, score + boost))
+            }
+        }
+        scored.sortWith(
             compareByDescending<Pair<AppEntry, Int>> { it.second }
-                .thenBy { it.first.label.lowercase() }
-        ).map { it.first }
+                .thenBy { it.first.lowerLabel }
+        )
+
+        val matched = ArrayList<AppEntry>(minOf(scored.size, 16))
+        for (i in 0 until minOf(scored.size, 16)) {
+            matched.add(scored[i].first)
+        }
 
         return SpotlightResult(
             mathExpression = if (mathResult != null) trimmed else null,
             mathResult = mathResult,
-            suggestedApps = suggested.take(4),
-            matchedApps = scored.take(16)
+            suggestedApps = emptyList(),
+            matchedApps = matched
         )
     }
 
-    internal fun matchScore(label: String, pkg: String, query: String): Int {
+    internal fun matchScore(
+        label: String,
+        pkg: String,
+        query: String,
+        isT9Query: Boolean = query.length >= 2 && query.all { it in '2'..'9' }
+    ): Int {
         if (label == query) return 1000
         if (label.startsWith(query)) return 750 - (label.length - query.length).coerceAtLeast(0)
-        // Word boundary prefix match (e.g. "wa" -> "WhatsApp" or "gm" -> "Google Maps")
-        val words = label.split(" ", "-", "_", ".")
-        if (words.any { it.startsWith(query) }) return 550
-        val initials = words.filter { it.isNotEmpty() }.joinToString("") { it[0].toString() }
-        if (initials.startsWith(query) && query.length >= 2) return 480
+
+        // Zero-allocation word-boundary prefix & initials scan
+        var atWordStart = true
+        var initialIdx = 0
+        var initialsMatch = query.length >= 2
+        for (i in label.indices) {
+            val c = label[i]
+            val isSep = c == ' ' || c == '-' || c == '_' || c == '.'
+            if (isSep) {
+                atWordStart = true
+            } else if (atWordStart) {
+                atWordStart = false
+                if (i > 0 && label.startsWith(query, startIndex = i)) {
+                    return 550
+                }
+                if (initialsMatch && initialIdx < query.length) {
+                    if (c == query[initialIdx]) {
+                        initialIdx++
+                    } else {
+                        initialsMatch = false
+                    }
+                }
+            }
+        }
+        if (initialsMatch && initialIdx == query.length) return 480
+
         if (label.contains(query)) return 360
-        if (pkg.contains(query) && query.length >= 3) return 180
+        if (query.length >= 3 && pkg.contains(query)) return 180
 
         // T9 numeric keypad prefix match (e.g. "942" -> "WhatsApp", "226" -> "Camera")
-        if (query.length >= 2 && query.all { it in '2'..'9' }) {
+        if (isT9Query) {
             val t9Label = toT9Digits(label)
             if (t9Label.startsWith(query)) return 420
             if (t9Label.contains(query)) return 260
         }
 
         // Lightweight subsequence fuzzy match
-        var qi = 0
-        for (ch in label) {
-            if (qi < query.length && ch == query[qi]) qi++
+        if (query.length >= 2) {
+            var qi = 0
+            for (i in label.indices) {
+                if (label[i] == query[qi]) {
+                    qi++
+                    if (qi == query.length) return 120
+                }
+            }
         }
-        return if (qi == query.length && query.length >= 2) 120 else 0
+        return 0
     }
 
     fun toT9Digits(text: String): String {

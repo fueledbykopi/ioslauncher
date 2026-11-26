@@ -10,16 +10,19 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.View
+import android.view.animation.OvershootInterpolator
 import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.IconThemeStyle
 
 /**
- * Shared Apple iOS Liquid Glass & Frosted Blur styling, typography tokens, and haptic utilities.
+ * Shared Apple iOS Liquid Glass, Frosted Glass & Frosted Blur styling,
+ * shared Typography/Interpolator singletons (zero per-view allocations), and haptic utilities.
  */
 object IosDesign {
 
@@ -35,6 +38,14 @@ object IosDesign {
     const val IOS_DOCK_GLASS: Int = 0x44EAEAF0
     const val IOS_DOCK_DARK_GLASS: Int = 0x661C1C1E
     const val IOS_GLASS_STROKE: Int = 0x38FFFFFF
+
+    // Shared immutable font & interpolator singletons to cut per-view memory allocations
+    val TYPEFACE_REGULAR: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+    val TYPEFACE_MEDIUM: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    val TYPEFACE_MEDIUM_BOLD: Typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+    val TYPEFACE_LIGHT: Typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+    val TYPEFACE_LIGHT_BOLD: Typeface = Typeface.create("sans-serif-light", Typeface.BOLD)
+    val RELEASE_OVERSHOOT = OvershootInterpolator(1.15f)
 
     val TINT_PRESETS = listOf(
         "iOS Blue" to IOS_BLUE,
@@ -71,7 +82,7 @@ object IosDesign {
     }
 
     /**
-     * Multi-stop iOS 18 frosted glass surface with top luminous sheen and crisp specular rim.
+     * Multi-stop iOS frosted surface with subtle vertical luminosity gradient and crisp rim.
      */
     fun createFrostedSurface(
         context: Context,
@@ -92,9 +103,10 @@ object IosDesign {
     }
 
     /**
-     * Authentic latest Apple iOS surface builder supporting:
-     * - LIQUID_GLASS: Optical refractive translucent glass with directional specular edge & top caustic sheen
-     * - FROSTED_BLUR: Classic rich iOS 18 milky frosted glass
+     * Authentic Apple iOS material surface builder supporting:
+     * - LIQUID_GLASS: Apple iOS 26 optical refractive glass with top caustic sheen & directional specular rim
+     * - FROSTED_GLASS: Apple etched satin frosted glass with luminous top chamfer bevel & crystalline edge
+     * - FROSTED_BLUR: Apple iOS UIVisualEffectView creamy Gaussian frosted material with soft vibrancy veil
      * - OBSIDIAN_GLASS: Deep smoked dark glass with titanium rim
      */
     fun createThemeSurface(
@@ -105,11 +117,11 @@ object IosDesign {
         strongSurface: Boolean = false
     ): Drawable {
         val radiusPx = dp(context, cornerRadiusDp)
-        val strokePx = dp(context, if (glassStyle == GlassThemeStyle.LIQUID_GLASS) 1.15f else 0.9f)
         val darkBias = iconStyle != IconThemeStyle.LIGHT
 
         return when (glassStyle) {
             GlassThemeStyle.LIQUID_GLASS -> {
+                val strokePx = dp(context, 1.15f)
                 if (strongSurface) {
                     IosLiquidGlassDrawable(
                         cornerRadiusPx = radiusPx,
@@ -137,27 +149,65 @@ object IosDesign {
                 }
             }
 
-            GlassThemeStyle.FROSTED_BLUR -> {
+            GlassThemeStyle.FROSTED_GLASS -> {
+                // Apple Frosted Glass: luminous etched satin frost + crisp inner top chamfer + crystalline hairline rim
+                val strokePx = dp(context, 0.9f)
+                val innerBevelPx = dp(context, 1.15f)
                 if (strongSurface) {
-                    createFrostedSurface(
-                        context = context,
-                        cornerRadiusDp = cornerRadiusDp,
-                        topFillColor = if (darkBias) 0xB828282C.toInt() else 0x70F5F5FA,
-                        bottomFillColor = if (darkBias) 0xA818181C.toInt() else 0x56DCDCE6,
-                        strokeColor = if (darkBias) 0x38FFFFFF else 0x62FFFFFF
+                    IosFrostedGlassDrawable(
+                        cornerRadiusPx = radiusPx,
+                        strokeWidthPx = strokePx,
+                        innerBevelWidthPx = innerBevelPx,
+                        topFill = if (darkBias) 0xB428282E.toInt() else 0x80F8F9FE.toInt(),
+                        midFill = if (darkBias) 0xA21D1D22.toInt() else 0x6BECEEF7,
+                        bottomFill = if (darkBias) 0xAE18181D.toInt() else 0x74DFE2EE,
+                        topChamferGlow = if (darkBias) 0x2AFFFFFF else 0x52FFFFFF,
+                        rimTop = if (darkBias) 0x5AFFFFFF else 0x9EFFFFFF.toInt(),
+                        rimMid = if (darkBias) 0x24FFFFFF else 0x48FFFFFF,
+                        rimBottom = if (darkBias) 0x36FFFFFF else 0x64FFFFFF
                     )
                 } else {
-                    createFrostedSurface(
-                        context = context,
-                        cornerRadiusDp = cornerRadiusDp,
-                        topFillColor = if (darkBias) 0x782C2C30 else 0x5CF2F2F8,
-                        bottomFillColor = if (darkBias) 0x5C161618 else 0x40D6D6E0,
-                        strokeColor = if (darkBias) 0x36FFFFFF else 0x5CFFFFFF
+                    IosFrostedGlassDrawable(
+                        cornerRadiusPx = radiusPx,
+                        strokeWidthPx = strokePx,
+                        innerBevelWidthPx = innerBevelPx,
+                        topFill = if (darkBias) 0x7825252B else 0x5CF7F8FD,
+                        midFill = if (darkBias) 0x641B1B20 else 0x48EAEBF4,
+                        bottomFill = if (darkBias) 0x7016161B else 0x52DCDFEC,
+                        topChamferGlow = if (darkBias) 0x22FFFFFF else 0x46FFFFFF,
+                        rimTop = if (darkBias) 0x54FFFFFF else 0x8CFFFFFF.toInt(),
+                        rimMid = if (darkBias) 0x1EFFFFFF else 0x3AFFFFFF,
+                        rimBottom = if (darkBias) 0x30FFFFFF else 0x52FFFFFF
+                    )
+                }
+            }
+
+            GlassThemeStyle.FROSTED_BLUR -> {
+                // Apple UIVisualEffectView Frosted Blur: milky diffused atmospheric veil + whisper-thin edge
+                val strokePx = dp(context, 0.7f)
+                if (strongSurface) {
+                    IosFrostedBlurDrawable(
+                        cornerRadiusPx = radiusPx,
+                        strokeWidthPx = strokePx,
+                        topFill = if (darkBias) 0xC8242429.toInt() else 0x90F4F5FA.toInt(),
+                        bottomFill = if (darkBias) 0xBC18181D.toInt() else 0x7CE0E2EC,
+                        innerVeil = if (darkBias) 0x14FFFFFF else 0x28FFFFFF,
+                        rimColor = if (darkBias) 0x32FFFFFF else 0x52FFFFFF
+                    )
+                } else {
+                    IosFrostedBlurDrawable(
+                        cornerRadiusPx = radiusPx,
+                        strokeWidthPx = strokePx,
+                        topFill = if (darkBias) 0x8E222227.toInt() else 0x72F2F3F8,
+                        bottomFill = if (darkBias) 0x7C16161B else 0x5ADCE0EC,
+                        innerVeil = if (darkBias) 0x10FFFFFF else 0x22FFFFFF,
+                        rimColor = if (darkBias) 0x2AFFFFFF else 0x46FFFFFF
                     )
                 }
             }
 
             GlassThemeStyle.OBSIDIAN_GLASS -> {
+                val strokePx = dp(context, 0.95f)
                 IosLiquidGlassDrawable(
                     cornerRadiusPx = radiusPx,
                     strokeWidthPx = strokePx,
@@ -176,8 +226,27 @@ object IosDesign {
     fun blurRadiusFor(glassStyle: GlassThemeStyle, strong: Boolean = false): Float {
         return when (glassStyle) {
             GlassThemeStyle.LIQUID_GLASS -> if (strong) 22f else 14f
-            GlassThemeStyle.FROSTED_BLUR -> if (strong) 30f else 24f
+            GlassThemeStyle.FROSTED_GLASS -> if (strong) 26f else 18f
+            GlassThemeStyle.FROSTED_BLUR -> if (strong) 36f else 28f
             GlassThemeStyle.OBSIDIAN_GLASS -> if (strong) 24f else 18f
+        }
+    }
+
+    fun vibrancySaturationFor(glassStyle: GlassThemeStyle): Float {
+        return when (glassStyle) {
+            GlassThemeStyle.LIQUID_GLASS -> 1.18f
+            GlassThemeStyle.FROSTED_GLASS -> 1.24f
+            GlassThemeStyle.FROSTED_BLUR -> 1.42f
+            GlassThemeStyle.OBSIDIAN_GLASS -> 1.12f
+        }
+    }
+
+    fun windowBlurRadiusFor(glassStyle: GlassThemeStyle, strong: Boolean = false): Int {
+        return when (glassStyle) {
+            GlassThemeStyle.LIQUID_GLASS -> if (strong) 28 else 16
+            GlassThemeStyle.FROSTED_GLASS -> if (strong) 34 else 20
+            GlassThemeStyle.FROSTED_BLUR -> if (strong) 48 else 32
+            GlassThemeStyle.OBSIDIAN_GLASS -> if (strong) 32 else 20
         }
     }
 
@@ -290,6 +359,192 @@ class IosLiquidGlassDrawable(
     override fun setColorFilter(colorFilter: ColorFilter?) {
         fillPaint.colorFilter = colorFilter
         sheenPaint.colorFilter = colorFilter
+        rimPaint.colorFilter = colorFilter
+        invalidateSelf()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+/**
+ * Zero-allocation Apple Frosted Glass Drawable.
+ * Authentic satin etched Apple glass sheet featuring:
+ * 1. Smooth 3-stop satin cool-frost body
+ * 2. Crisp luminous top-edge chamfer reflection (Apple's hallmark frosted bevel)
+ * 3. Precision crystalline hairline outer rim
+ */
+class IosFrostedGlassDrawable(
+    private val cornerRadiusPx: Float,
+    private val strokeWidthPx: Float,
+    private val innerBevelWidthPx: Float,
+    private val topFill: Int,
+    private val midFill: Int,
+    private val bottomFill: Int,
+    private val topChamferGlow: Int,
+    private val rimTop: Int,
+    private val rimMid: Int,
+    private val rimBottom: Int
+) : Drawable() {
+
+    private val rect = RectF()
+    private val innerRect = RectF()
+    private val chamferRect = RectF()
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val chamferPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val innerBevelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = innerBevelWidthPx
+    }
+    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = strokeWidthPx
+    }
+
+    override fun onBoundsChange(bounds: Rect) {
+        super.onBoundsChange(bounds)
+        val halfStroke = strokeWidthPx * 0.5f
+        rect.set(
+            bounds.left + halfStroke,
+            bounds.top + halfStroke,
+            bounds.right - halfStroke,
+            bounds.bottom - halfStroke
+        )
+        val inset = strokeWidthPx + innerBevelWidthPx * 0.5f
+        innerRect.set(
+            bounds.left + inset,
+            bounds.top + inset,
+            bounds.right - inset,
+            bounds.bottom - inset
+        )
+        val h = rect.height().coerceAtLeast(1f)
+        chamferRect.set(
+            innerRect.left,
+            innerRect.top,
+            innerRect.right,
+            innerRect.top + (h * 0.24f)
+        )
+        fillPaint.shader = LinearGradient(
+            rect.left, rect.top, rect.left, rect.bottom,
+            intArrayOf(topFill, midFill, bottomFill),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        chamferPaint.shader = LinearGradient(
+            chamferRect.left, chamferRect.top, chamferRect.left, chamferRect.bottom,
+            topChamferGlow,
+            0x00FFFFFF,
+            Shader.TileMode.CLAMP
+        )
+        innerBevelPaint.shader = LinearGradient(
+            innerRect.left, innerRect.top, innerRect.left, innerRect.bottom,
+            intArrayOf(topChamferGlow, 0x00FFFFFF, 0x10000000),
+            floatArrayOf(0f, 0.35f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        rimPaint.shader = LinearGradient(
+            rect.left, rect.top, rect.left, rect.bottom,
+            intArrayOf(rimTop, rimMid, rimBottom),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP
+        )
+    }
+
+    override fun draw(canvas: Canvas) {
+        if (rect.width() <= 0f || rect.height() <= 0f) return
+        val r = minOf(cornerRadiusPx, rect.height() * 0.5f, rect.width() * 0.5f)
+        val innerR = (r - strokeWidthPx).coerceAtLeast(0f)
+        canvas.drawRoundRect(rect, r, r, fillPaint)
+        canvas.drawRoundRect(chamferRect, innerR, innerR, chamferPaint)
+        canvas.drawRoundRect(innerRect, innerR, innerR, innerBevelPaint)
+        canvas.drawRoundRect(rect, r, r, rimPaint)
+    }
+
+    override fun setAlpha(alpha: Int) {
+        fillPaint.alpha = alpha
+        chamferPaint.alpha = alpha
+        innerBevelPaint.alpha = alpha
+        rimPaint.alpha = alpha
+        invalidateSelf()
+    }
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        fillPaint.colorFilter = colorFilter
+        chamferPaint.colorFilter = colorFilter
+        innerBevelPaint.colorFilter = colorFilter
+        rimPaint.colorFilter = colorFilter
+        invalidateSelf()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+/**
+ * Zero-allocation Apple UIVisualEffectView Frosted Blur Drawable.
+ * Creamy Gaussian diffused backdrop material with soft atmospheric luminance
+ * and Apple's whisper-thin hairline separator border.
+ */
+class IosFrostedBlurDrawable(
+    private val cornerRadiusPx: Float,
+    private val strokeWidthPx: Float,
+    private val topFill: Int,
+    private val bottomFill: Int,
+    private val innerVeil: Int,
+    private val rimColor: Int
+) : Drawable() {
+
+    private val rect = RectF()
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val veilPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = strokeWidthPx
+        color = rimColor
+    }
+
+    override fun onBoundsChange(bounds: Rect) {
+        super.onBoundsChange(bounds)
+        val halfStroke = strokeWidthPx * 0.5f
+        rect.set(
+            bounds.left + halfStroke,
+            bounds.top + halfStroke,
+            bounds.right - halfStroke,
+            bounds.bottom - halfStroke
+        )
+        fillPaint.shader = LinearGradient(
+            rect.left, rect.top, rect.left, rect.bottom,
+            topFill,
+            bottomFill,
+            Shader.TileMode.CLAMP
+        )
+        val halfVeil = ((Color.alpha(innerVeil) / 2) shl 24) or (innerVeil and 0x00FFFFFF)
+        veilPaint.shader = LinearGradient(
+            rect.left, rect.top, rect.left, rect.bottom,
+            intArrayOf(innerVeil, 0x00FFFFFF, halfVeil),
+            floatArrayOf(0f, 0.6f, 1f),
+            Shader.TileMode.CLAMP
+        )
+    }
+
+    override fun draw(canvas: Canvas) {
+        if (rect.width() <= 0f || rect.height() <= 0f) return
+        val r = minOf(cornerRadiusPx, rect.height() * 0.5f, rect.width() * 0.5f)
+        canvas.drawRoundRect(rect, r, r, fillPaint)
+        canvas.drawRoundRect(rect, r, r, veilPaint)
+        canvas.drawRoundRect(rect, r, r, rimPaint)
+    }
+
+    override fun setAlpha(alpha: Int) {
+        fillPaint.alpha = alpha
+        veilPaint.alpha = alpha
+        rimPaint.alpha = alpha
+        invalidateSelf()
+    }
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        fillPaint.colorFilter = colorFilter
+        veilPaint.colorFilter = colorFilter
         rimPaint.colorFilter = colorFilter
         invalidateSelf()
     }

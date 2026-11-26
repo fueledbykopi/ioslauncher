@@ -21,8 +21,9 @@ enum class IconThemeStyle(val label: String) {
 }
 
 enum class GlassThemeStyle(val label: String, val subtitle: String) {
-    LIQUID_GLASS("Liquid Glass (Latest iOS)", "Crystal-clear refractive optical glass & specular rim"),
-    FROSTED_BLUR("Frosted Blur (iOS 18)", "Rich milky frosted glass with smooth backdrop blur"),
+    LIQUID_GLASS("Liquid Glass (iOS 26)", "Crystal-clear refractive optical glass & specular rim"),
+    FROSTED_GLASS("Frosted Glass (Apple)", "Satin crystalline Apple glass with luminous specular bevel"),
+    FROSTED_BLUR("Frosted Blur (Apple)", "Rich Apple Gaussian frosted blur with vibrant backdrop diffusion"),
     OBSIDIAN_GLASS("Obsidian Glass (Dark)", "Deep smoked dark glass with titanium sheen")
 }
 
@@ -52,7 +53,9 @@ data class AppEntry(
     val isSystemApp: Boolean = false,
     val firstInstallTime: Long = 0L
 ) {
-    val componentKey: String get() = "$packageName/$className"
+    val componentKey: String = "$packageName/$className"
+    val lowerLabel: String by lazy(LazyThreadSafetyMode.NONE) { label.lowercase() }
+    val lowerPackage: String by lazy(LazyThreadSafetyMode.NONE) { packageName.lowercase() }
 }
 
 sealed class HomeItem {
@@ -139,6 +142,8 @@ data class LauncherPreferences(
     val swipeDownSpotlight: Boolean = true,
     val todayViewEnabled: Boolean = true,
     val appLibraryEnabled: Boolean = true,
+    val autoArrangeIcons: Boolean = true,
+    val cleanModeEnabled: Boolean = false,
     val colorOsGestureSafeZone: Boolean = true,
     val hiddenPackages: Set<String> = emptySet(),
     val lockedPackages: Set<String> = emptySet()

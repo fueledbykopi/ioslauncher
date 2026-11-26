@@ -34,7 +34,6 @@ class LauncherRepository(private val context: Context) {
 
     fun loadInstalledApps(): List<AppEntry> {
         val launcherApps = context.getSystemService(LauncherApps::class.java)
-        val pm = context.packageManager
         val selfPkg = context.packageName
 
         val list = try {
@@ -43,18 +42,15 @@ class LauncherRepository(private val context: Context) {
             emptyList()
         }
 
-        val entries = mutableListOf<AppEntry>()
+        val entries = ArrayList<AppEntry>(list.size)
         for (info in list) {
             val pkg = info.componentName.packageName
             if (pkg == selfPkg) continue
             val appInfo = info.applicationInfo
             val isSys = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
             val label = info.label?.toString()?.trim().orEmpty().ifEmpty { pkg }
-            val installTime = try {
-                pm.getPackageInfo(pkg, 0).firstInstallTime
-            } catch (_: Exception) {
-                0L
-            }
+            // Direct LauncherActivityInfo.firstInstallTime avoids 100+ extra PackageManager IPC calls!
+            val installTime = info.firstInstallTime
             val category = AppCategorizer.classify(pkg, label, appInfo.category)
             entries.add(
                 AppEntry(
@@ -67,13 +63,13 @@ class LauncherRepository(private val context: Context) {
                 )
             )
         }
-        return entries.sortedBy { it.label.lowercase() }
+        entries.sortBy { it.lowerLabel }
+        return entries
     }
 
     fun loadAppForPackage(packageName: String): List<AppEntry> {
         if (packageName == context.packageName) return emptyList()
         val launcherApps = context.getSystemService(LauncherApps::class.java)
-        val pm = context.packageManager
         val list = try {
             launcherApps?.getActivityList(packageName, Process.myUserHandle()).orEmpty()
         } catch (_: Exception) {
@@ -83,25 +79,26 @@ class LauncherRepository(private val context: Context) {
             val appInfo = info.applicationInfo
             val isSys = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
             val label = info.label?.toString()?.trim().orEmpty().ifEmpty { packageName }
-            val installTime = try {
-                pm.getPackageInfo(packageName, 0).firstInstallTime
-            } catch (_: Exception) {
-                System.currentTimeMillis()
-            }
             AppEntry(
                 packageName = packageName,
                 className = info.componentName.className,
                 label = label,
                 category = AppCategorizer.classify(packageName, label, appInfo.category),
                 isSystemApp = isSys,
-                firstInstallTime = installTime
+                firstInstallTime = info.firstInstallTime
             )
         }
     }
 
     fun loadPreferences(): LauncherPreferences {
         val styleOrd = prefs.getInt(KEY_ICON_STYLE, IconThemeStyle.LIGHT.ordinal)
-        val glassOrd = prefs.getInt(KEY_GLASS_STYLE, GlassThemeStyle.LIQUID_GLASS.ordinal)
+        val glassStyle = prefs.getString(KEY_GLASS_STYLE_NAME, null)?.let { savedName ->
+            runCatching { GlassThemeStyle.valueOf(savedName) }.getOrNull()
+        } ?: when (prefs.getInt(KEY_GLASS_STYLE, 0)) {
+            1 -> GlassThemeStyle.FROSTED_BLUR
+            2 -> GlassThemeStyle.OBSIDIAN_GLASS
+            else -> GlassThemeStyle.LIQUID_GLASS
+        }
         val sizeOrd = prefs.getInt(KEY_ICON_SIZE, IconSizeMode.STANDARD.ordinal)
         val hiddenSet = prefs.getStringSet(KEY_HIDDEN_PACKAGES, emptySet())?.toSet() ?: emptySet()
         val lockedSet = prefs.getStringSet(KEY_LOCKED_PACKAGES, emptySet())?.toSet() ?: emptySet()
@@ -110,7 +107,7 @@ class LauncherRepository(private val context: Context) {
             gridCols = prefs.getInt(KEY_GRID_COLS, 4).coerceIn(4, 5),
             gridRows = prefs.getInt(KEY_GRID_ROWS, 6).coerceIn(5, 7),
             iconThemeStyle = IconThemeStyle.entries.getOrElse(styleOrd) { IconThemeStyle.LIGHT },
-            glassThemeStyle = GlassThemeStyle.entries.getOrElse(glassOrd) { GlassThemeStyle.LIQUID_GLASS },
+            glassThemeStyle = glassStyle,
             iconTintColor = prefs.getInt(KEY_ICON_TINT, Color.parseColor("#0A84FF")),
             iconSizeMode = IconSizeMode.entries.getOrElse(sizeOrd) { IconSizeMode.STANDARD },
             showAppLabels = prefs.getBoolean(KEY_SHOW_APP_LABELS, true),
@@ -123,6 +120,8 @@ class LauncherRepository(private val context: Context) {
             swipeDownSpotlight = prefs.getBoolean(KEY_SWIPE_SPOTLIGHT, true),
             todayViewEnabled = prefs.getBoolean(KEY_TODAY_VIEW, true),
             appLibraryEnabled = prefs.getBoolean(KEY_APP_LIBRARY, true),
+            autoArrangeIcons = prefs.getBoolean(KEY_AUTO_ARRANGE, true),
+            cleanModeEnabled = prefs.getBoolean(KEY_CLEAN_MODE, false),
             colorOsGestureSafeZone = prefs.getBoolean(KEY_COLOROS_SAFE, true),
             hiddenPackages = hiddenSet,
             lockedPackages = lockedSet
@@ -135,6 +134,7 @@ class LauncherRepository(private val context: Context) {
             .putInt(KEY_GRID_ROWS, p.gridRows)
             .putInt(KEY_ICON_STYLE, p.iconThemeStyle.ordinal)
             .putInt(KEY_GLASS_STYLE, p.glassThemeStyle.ordinal)
+            .putString(KEY_GLASS_STYLE_NAME, p.glassThemeStyle.name)
             .putInt(KEY_ICON_TINT, p.iconTintColor)
             .putInt(KEY_ICON_SIZE, p.iconSizeMode.ordinal)
             .putBoolean(KEY_SHOW_APP_LABELS, p.showAppLabels)
@@ -147,6 +147,8 @@ class LauncherRepository(private val context: Context) {
             .putBoolean(KEY_SWIPE_SPOTLIGHT, p.swipeDownSpotlight)
             .putBoolean(KEY_TODAY_VIEW, p.todayViewEnabled)
             .putBoolean(KEY_APP_LIBRARY, p.appLibraryEnabled)
+            .putBoolean(KEY_AUTO_ARRANGE, p.autoArrangeIcons)
+            .putBoolean(KEY_CLEAN_MODE, p.cleanModeEnabled)
             .putBoolean(KEY_COLOROS_SAFE, p.colorOsGestureSafeZone)
             .putStringSet(KEY_HIDDEN_PACKAGES, p.hiddenPackages)
             .putStringSet(KEY_LOCKED_PACKAGES, p.lockedPackages)
@@ -311,7 +313,19 @@ class LauncherRepository(private val context: Context) {
             }
         }
         state.items.removeAll(toRemove.toSet())
-        state.pagesCount = ((state.items.maxOfOrNull { it.page } ?: 0) + 1).coerceAtLeast(1)
+        // Re-index dock slots cleanly after removals
+        if (state.dock.isNotEmpty()) {
+            val reindexed = state.dock.mapIndexed { idx, slot ->
+                if (slot.index == idx) slot else slot.copy(index = idx)
+            }
+            state.dock.clear()
+            state.dock.addAll(reindexed)
+        }
+        if (prefs.autoArrangeIcons) {
+            GridOccupancy.compactWorkspace(state, prefs.gridCols, prefs.gridRows)
+        } else {
+            state.pagesCount = ((state.items.maxOfOrNull { it.page } ?: 0) + 1).coerceAtLeast(1)
+        }
     }
 
     fun saveWorkspaceAsync(state: LauncherWorkspaceState) {
@@ -348,6 +362,7 @@ class LauncherRepository(private val context: Context) {
         private const val KEY_GRID_ROWS = "grid_rows"
         private const val KEY_ICON_STYLE = "icon_style"
         private const val KEY_GLASS_STYLE = "glass_style"
+        private const val KEY_GLASS_STYLE_NAME = "glass_style_name"
         private const val KEY_ICON_TINT = "icon_tint"
         private const val KEY_ICON_SIZE = "icon_size"
         private const val KEY_SHOW_APP_LABELS = "show_app_labels"
@@ -360,6 +375,8 @@ class LauncherRepository(private val context: Context) {
         private const val KEY_SWIPE_SPOTLIGHT = "swipe_spotlight"
         private const val KEY_TODAY_VIEW = "today_view"
         private const val KEY_APP_LIBRARY = "app_library"
+        private const val KEY_AUTO_ARRANGE = "auto_arrange_icons"
+        private const val KEY_CLEAN_MODE = "clean_mode"
         private const val KEY_COLOROS_SAFE = "coloros_safe"
         private const val KEY_HIDDEN_PACKAGES = "hidden_packages"
         private const val KEY_LOCKED_PACKAGES = "locked_packages"

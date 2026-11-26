@@ -9,18 +9,18 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
-import android.graphics.Typeface
 import android.text.TextPaint
 import android.text.TextUtils
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
-import android.view.animation.OvershootInterpolator
+import com.iospring.launcher.core.IconCacheManager
 import com.iospring.launcher.core.SquircleMath
+import com.iospring.launcher.model.GlassThemeStyle
 import kotlin.random.Random
 
 /**
- * Single-View, zero-nesting iOS 18 App Icon & Folder Icon renderer.
+ * Single-View, zero-nesting, zero-draw-allocation iOS 18+ App Icon & Folder Icon renderer.
  * Draws the squircle icon (or 3x3 frosted folder preview), crisp shadowed label,
  * red iOS notification badge, and jiggle-mode (-) badge in one GPU draw pass.
  */
@@ -31,14 +31,19 @@ class IosAppIconView(context: Context) : View(context) {
     var classNameRef: String = ""
     var label: String = ""
         set(value) {
-            field = value
-            invalidate()
+            if (field != value) {
+                field = value
+                cachedEllipsizedLabel = null
+                invalidate()
+            }
         }
 
     var iconBitmap: Bitmap? = null
         set(value) {
-            field = value
-            invalidate()
+            if (field !== value) {
+                field = value
+                invalidate()
+            }
         }
 
     var isFolder: Boolean = false
@@ -73,7 +78,7 @@ class IosAppIconView(context: Context) : View(context) {
         }
 
     var darkGlassFolder: Boolean = false
-    var liquidGlassFolder: Boolean = true
+    var glassThemeStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
 
     var onRemoveBadgeClick: (() -> Unit)? = null
 
@@ -82,16 +87,19 @@ class IosAppIconView(context: Context) : View(context) {
 
     private val iconRect = RectF()
     private val removeHitRect = RectF()
+    private val shadowRect = RectF()
+    private val miniRect = RectF()
+    private val badgePillRect = RectF()
     private var folderClipPath: Path? = null
-    private var lastFolderSize: Float = -1f
+    private var lastFolderSizePx: Int = -1
+    private var cachedEllipsizedLabel: CharSequence? = null
+    private var lastEllipsizeWidth: Float = -1f
 
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val iconShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x26000000
         style = Paint.Style.FILL
     }
-    private val shadowRect = RectF()
-    private val releaseInterpolator = OvershootInterpolator(1.15f)
 
     private val folderBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -105,7 +113,7 @@ class IosAppIconView(context: Context) : View(context) {
     private val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = IosDesign.sp(context, 11.8f)
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        typeface = IosDesign.TYPEFACE_MEDIUM
         textAlign = Paint.Align.CENTER
         setShadowLayer(IosDesign.dp(context, 3.0f), 0f, IosDesign.dp(context, 1.2f), 0xC0000000.toInt())
     }
@@ -117,7 +125,7 @@ class IosAppIconView(context: Context) : View(context) {
     private val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = IosDesign.sp(context, 10.5f)
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
         textAlign = Paint.Align.CENTER
     }
 
@@ -134,6 +142,24 @@ class IosAppIconView(context: Context) : View(context) {
     init {
         isClickable = true
         isFocusable = true
+    }
+
+    /**
+     * Binds icon instantaneously from LruCache if warm, or loads off-thread without stalling UI.
+     */
+    fun bindIconAsync(cache: IconCacheManager, pkg: String, cls: String, appLabel: String) {
+        packageNameRef = pkg
+        classNameRef = cls
+        val cached = cache.getCachedIcon(pkg, cls)
+        if (cached != null) {
+            iconBitmap = cached
+            return
+        }
+        cache.loadIconAsync(pkg, cls, appLabel) { bmp ->
+            if (packageNameRef == pkg && classNameRef == cls) {
+                iconBitmap = bmp
+            }
+        }
     }
 
     fun setJiggling(jiggle: Boolean) {
@@ -176,7 +202,7 @@ class IosAppIconView(context: Context) : View(context) {
                 animate().scaleX(0.88f).scaleY(0.88f).alpha(0.86f).setDuration(90L).setInterpolator(null).start()
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(190L).setInterpolator(releaseInterpolator).start()
+                animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(190L).setInterpolator(IosDesign.RELEASE_OVERSHOOT).start()
             }
         }
         return super.onTouchEvent(event)
@@ -230,39 +256,58 @@ class IosAppIconView(context: Context) : View(context) {
             drawRemoveBadge(canvas, iconRect)
         }
 
-        // Crisp iOS App Label below icon
+        // Crisp iOS App Label below icon (cached ellipsize -> zero per-frame allocations)
         if (showText && label.isNotEmpty()) {
             val maxTextW = (w - IosDesign.dp(context, 4f)).coerceAtLeast(24f)
-            val ellipsized = TextUtils.ellipsize(label, labelPaint, maxTextW, TextUtils.TruncateAt.END)
+            if (cachedEllipsizedLabel == null || lastEllipsizeWidth != maxTextW) {
+                cachedEllipsizedLabel = TextUtils.ellipsize(label, labelPaint, maxTextW, TextUtils.TruncateAt.END)
+                lastEllipsizeWidth = maxTextW
+            }
+            val ellipsized = cachedEllipsizedLabel ?: label
             val textY = iconRect.bottom + IosDesign.dp(context, 14f)
             canvas.drawText(ellipsized, 0, ellipsized.length, w / 2f, textY, labelPaint)
         }
     }
 
     private fun drawFolderIcon(canvas: Canvas, rect: RectF) {
-        if (lastFolderSize != rect.width() || folderClipPath == null) {
-            lastFolderSize = rect.width()
-            folderClipPath = SquircleMath.createSquirclePath(RectF(0f, 0f, rect.width(), rect.height()))
+        val sizeInt = rect.width().toInt().coerceAtLeast(1)
+        if (lastFolderSizePx != sizeInt || folderClipPath == null) {
+            lastFolderSizePx = sizeInt
+            folderClipPath = SquircleMath.getCachedSquareSquircle(sizeInt)
         }
         val save = canvas.save()
         canvas.translate(rect.left, rect.top)
-        folderBgPaint.color = when {
-            darkGlassFolder -> 0x7A1E1E24.toInt()
-            liquidGlassFolder -> 0x3CFFFFFF
-            else -> 0x5CF2F2F7
+        when {
+            darkGlassFolder || glassThemeStyle == GlassThemeStyle.OBSIDIAN_GLASS -> {
+                folderBgPaint.color = 0x7A1E1E24.toInt()
+                folderBorderPaint.color = 0x52FFFFFF
+                folderBorderPaint.strokeWidth = IosDesign.dp(context, 1.0f)
+            }
+            glassThemeStyle == GlassThemeStyle.LIQUID_GLASS -> {
+                folderBgPaint.color = 0x3CFFFFFF
+                folderBorderPaint.color = 0x92FFFFFF.toInt()
+                folderBorderPaint.strokeWidth = IosDesign.dp(context, 1.25f)
+            }
+            glassThemeStyle == GlassThemeStyle.FROSTED_GLASS -> {
+                folderBgPaint.color = 0x5CF4F6FC
+                folderBorderPaint.color = 0x82FFFFFF.toInt()
+                folderBorderPaint.strokeWidth = IosDesign.dp(context, 1.05f)
+            }
+            else -> { // FROSTED_BLUR
+                folderBgPaint.color = 0x70F0F2F8
+                folderBorderPaint.color = 0x48FFFFFF
+                folderBorderPaint.strokeWidth = IosDesign.dp(context, 0.8f)
+            }
         }
-        folderBorderPaint.color = if (liquidGlassFolder) 0x8EFFFFFF.toInt() else 0x52FFFFFF
-        folderBorderPaint.strokeWidth = IosDesign.dp(context, if (liquidGlassFolder) 1.25f else 1.0f)
         folderClipPath?.let { path ->
             canvas.drawPath(path, folderBgPaint)
             canvas.save()
             canvas.clipPath(path)
 
-            // 3x3 mini app grid inside folder
+            // 3x3 mini app grid inside folder (reuses miniRect -> zero per-frame allocations)
             val pad = rect.width() * 0.13f
             val gap = rect.width() * 0.06f
             val cell = (rect.width() - pad * 2f - gap * 2f) / 3f
-            val miniRect = RectF()
             val count = minOf(folderIcons.size, 9)
             for (i in 0 until count) {
                 val r = i / 3
@@ -285,8 +330,8 @@ class IosAppIconView(context: Context) : View(context) {
         val pillW = maxOf(r * 2f, textW + IosDesign.dp(context, 10f))
         val cx = rect.right - IosDesign.dp(context, 2f)
         val cy = rect.top + IosDesign.dp(context, 2f)
-        val pillRect = RectF(cx - pillW / 2f, cy - r, cx + pillW / 2f, cy + r)
-        canvas.drawRoundRect(pillRect, r, r, badgeBgPaint)
+        badgePillRect.set(cx - pillW / 2f, cy - r, cx + pillW / 2f, cy + r)
+        canvas.drawRoundRect(badgePillRect, r, r, badgeBgPaint)
         val baseline = cy - (badgeTextPaint.descent() + badgeTextPaint.ascent()) / 2f
         canvas.drawText(text, cx, baseline, badgeTextPaint)
     }

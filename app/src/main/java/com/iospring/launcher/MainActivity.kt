@@ -20,6 +20,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -109,6 +110,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var dockView: IosDockView
     private lateinit var searchPill: IosSearchPillView
     private lateinit var editTopBar: LinearLayout
+    private lateinit var editPillBtn: TextView
+    private lateinit var donePillBtn: TextView
 
     // Overlays
     private lateinit var folderOverlay: IosFolderOverlayView
@@ -237,6 +240,8 @@ class MainActivity : ComponentActivity() {
                     latestPrefs.iconTintColor != prefs.iconTintColor ||
                     latestPrefs.iosIconPackEnabled != prefs.iosIconPackEnabled ||
                     latestPrefs.glassThemeStyle != prefs.glassThemeStyle
+                val modeChanged = latestPrefs.cleanModeEnabled != prefs.cleanModeEnabled
+                val arrangeEnabledNow = !prefs.autoArrangeIcons && latestPrefs.autoArrangeIcons
                 prefs = latestPrefs
                 if (themeChanged) {
                     iconCache.updateTheme(
@@ -250,8 +255,11 @@ class MainActivity : ComponentActivity() {
                 pager.swipeDownSpotlightEnabled = prefs.swipeDownSpotlight
                 applyGlassThemeToChrome()
                 repository.reconcileWithInstalledApps(workspace, installedApps, prefs)
+                if (arrangeEnabledNow) {
+                    repository.saveWorkspaceAsync(workspace)
+                }
                 pendingWorkspaceRebuild = false
-                rebuildWorkspacePages(preserveCurrentPage = true)
+                rebuildWorkspacePages(preserveCurrentPage = !modeChanged)
             }
         } else if (pendingWorkspaceRebuild) {
             pendingWorkspaceRebuild = false
@@ -300,6 +308,7 @@ class MainActivity : ComponentActivity() {
         packageReceiver?.unregister(this)
         unregisterLiveTickReceiver()
         mainScope.cancel()
+        iconCache.close()
         repository.close()
         super.onDestroy()
     }
@@ -308,7 +317,7 @@ class MainActivity : ComponentActivity() {
         super.onTrimMemory(level)
         if (level >= TRIM_MEMORY_COMPLETE) {
             iconCache.trimMemory(aggressive = true)
-        } else if (level >= TRIM_MEMORY_BACKGROUND) {
+        } else if (level >= TRIM_MEMORY_RUNNING_LOW || level >= TRIM_MEMORY_UI_HIDDEN) {
             iconCache.trimMemory(aggressive = false)
         }
     }
@@ -339,6 +348,13 @@ class MainActivity : ComponentActivity() {
                 if (totalCount > 1 && pageW > 0) {
                     val norm = scrollPx / ((totalCount - 1) * pageW).toFloat()
                     ColorOsCompat.updateWallpaperParallax(this@MainActivity, rootFrame, norm, totalCount)
+                    // Lazy-render App Library right as the user begins swiping toward it
+                    if (prefs.appLibraryEnabled && !prefs.cleanModeEnabled) {
+                        val lastHomePx = (currentHomePageOffset + homeGridPages.size - 1) * pageW.toFloat()
+                        if (scrollPx > lastHomePx + pageW * 0.08f) {
+                            appLibraryPage?.ensureRendered()
+                        }
+                    }
                 }
                 updateDockAndPillVisibility(scrollPx, pageW)
             }
@@ -348,7 +364,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             onEmptyLongPress = {
-                if (!isJiggleMode) {
+                if (!isJiggleMode && !prefs.cleanModeEnabled) {
                     IosDesign.hapticLongPress(this, prefs.hapticsEnabled)
                     enterJiggleMode()
                 }
@@ -440,6 +456,7 @@ class MainActivity : ComponentActivity() {
                 folder.apps.removeAll { it.id == app.id }
                 if (folder.apps.isEmpty()) {
                     workspace.items.removeAll { it.id == folder.id }
+                    compactIfAutoArrange()
                 } else if (folder.apps.size == 1) {
                     val last = folder.apps.first()
                     val idx = workspace.items.indexOfFirst { it.id == folder.id }
@@ -492,12 +509,12 @@ class MainActivity : ComponentActivity() {
             setPadding(hp, IosDesign.dpInt(this@MainActivity, 44f), hp, IosDesign.dpInt(this@MainActivity, 8f))
         }
 
-        val editPill = TextView(this).apply {
+        editPillBtn = TextView(this).apply {
             text = "Edit"
             setTextColor(Color.WHITE)
             textSize = 14f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            background = IosDesign.createPillDrawable(this@MainActivity, 0x58FFFFFF, 0x44FFFFFF)
+            typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
+            background = IosDesign.createThemeSurface(this@MainActivity, 999f, prefs.glassThemeStyle, prefs.iconThemeStyle)
             val hp = IosDesign.dpInt(this@MainActivity, 18f)
             val vp = IosDesign.dpInt(this@MainActivity, 7f)
             setPadding(hp, vp, hp, vp)
@@ -506,21 +523,21 @@ class MainActivity : ComponentActivity() {
 
         val spacer = View(this)
 
-        val donePill = TextView(this).apply {
+        donePillBtn = TextView(this).apply {
             text = "Done"
             setTextColor(Color.WHITE)
             textSize = 14f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            background = IosDesign.createPillDrawable(this@MainActivity, 0x58FFFFFF, 0x44FFFFFF)
+            typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
+            background = IosDesign.createThemeSurface(this@MainActivity, 999f, prefs.glassThemeStyle, prefs.iconThemeStyle)
             val hp = IosDesign.dpInt(this@MainActivity, 18f)
             val vp = IosDesign.dpInt(this@MainActivity, 7f)
             setPadding(hp, vp, hp, vp)
             setOnClickListener { exitJiggleMode() }
         }
 
-        bar.addView(editPill)
+        bar.addView(editPillBtn)
         bar.addView(spacer, LinearLayout.LayoutParams(0, 1, 1f))
-        bar.addView(donePill)
+        bar.addView(donePillBtn)
         return bar
     }
 
@@ -569,15 +586,22 @@ class MainActivity : ComponentActivity() {
                 val appsList = repository.loadInstalledApps()
                 val usage = repository.loadUsageScores()
                 val ws = repository.loadOrCreateWorkspace(appsList, prefs)
-                // Warm icon cache for Dock & Page 0 on background IO thread for instant first frame
-                ws.dock.forEach { iconCache.getIcon(it.packageName, it.className, it.label) }
-                ws.items.filter { it.page == 0 }.forEach { item ->
-                    when (item) {
-                        is HomeItem.AppShortcut -> iconCache.getIcon(item.packageName, item.className, item.label)
-                        is HomeItem.FolderItem -> item.apps.take(9).forEach {
-                            iconCache.getIcon(it.packageName, it.className, it.label)
+                // Warm only the immediately visible icons on IO thread for ultra-fast cold boot
+                if (prefs.cleanModeEnabled) {
+                    appsList.asSequence()
+                        .filterNot { it.packageName in prefs.hiddenPackages }
+                        .take(16)
+                        .forEach { iconCache.getIcon(it.packageName, it.className, it.label) }
+                } else {
+                    ws.dock.forEach { iconCache.getIcon(it.packageName, it.className, it.label) }
+                    ws.items.filter { it.page == 0 }.forEach { item ->
+                        when (item) {
+                            is HomeItem.AppShortcut -> iconCache.getIcon(item.packageName, item.className, item.label)
+                            is HomeItem.FolderItem -> item.apps.take(9).forEach {
+                                iconCache.getIcon(it.packageName, it.className, it.label)
+                            }
+                            else -> Unit
                         }
-                        else -> Unit
                     }
                 }
                 Triple(appsList, usage, ws)
@@ -661,6 +685,52 @@ class MainActivity : ComponentActivity() {
         workspace.pagesCount = maxOf(workspace.pagesCount, targetPage + 1)
     }
 
+    private fun compactIfAutoArrange() {
+        if (prefs.autoArrangeIcons) {
+            GridOccupancy.compactWorkspace(workspace, prefs.gridCols, prefs.gridRows)
+        } else {
+            workspace.pagesCount = ((workspace.items.maxOfOrNull { it.page } ?: 0) + 1).coerceAtLeast(1)
+        }
+    }
+
+    private fun getOrCreateAppLibraryPage(): IosAppLibraryPage {
+        val existing = appLibraryPage
+        if (existing != null) {
+            (existing.parent as? ViewGroup)?.removeView(existing)
+            return existing
+        }
+        return IosAppLibraryPage(this).apply {
+            onAppClick = { app, anchor ->
+                launchAppByComponent(app.packageName, app.className, app.label, anchor)
+            }
+            onAppLongClick = { app, anchor ->
+                IosDesign.hapticLongPress(anchor, prefs.hapticsEnabled)
+                showAppContextMenu(app.packageName, app.className, app.label, homeItem = null, dockSlot = null)
+            }
+            onOpenCategory = { title, apps ->
+                openCategoryFolderModal(title, apps)
+            }
+            onOpenHiddenFolder = {
+                openHiddenAppsWithBiometric()
+            }
+            onOpenSettings = {
+                openSettings()
+            }
+        }
+    }
+
+    private fun getOrCreateTodayViewPage(): IosTodayViewPage {
+        val existing = todayViewPage
+        if (existing != null) {
+            (existing.parent as? ViewGroup)?.removeView(existing)
+            return existing
+        }
+        return IosTodayViewPage(this).apply {
+            onOpenSettings = { openSettings() }
+            onAddWidget = { showAddWidgetDialog() }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Workspace Rendering
     // -------------------------------------------------------------------------
@@ -670,52 +740,69 @@ class MainActivity : ComponentActivity() {
         val pages = mutableListOf<View>()
         homeGridPages.clear()
 
-        currentHomePageOffset = if (prefs.todayViewEnabled) 1 else 0
-
-        // 1. Optional Today View (leftmost page)
-        if (prefs.todayViewEnabled) {
-            val tv = IosTodayViewPage(this).apply {
-                onOpenSettings = { openSettings() }
-                onAddWidget = { showAddWidgetDialog() }
-            }
-            todayViewPage = tv
-            pages.add(tv)
-        } else {
+        if (prefs.cleanModeEnabled) {
+            if (isJiggleMode) exitJiggleMode()
+            currentHomePageOffset = 0
             todayViewPage = null
-        }
 
-        // 2. Home Screen Grid Pages (0 .. pagesCount - 1)
-        val count = workspace.pagesCount.coerceAtLeast(1)
-        for (p in 0 until count) {
-            val gridPage = createHomeGridPage(p)
-            homeGridPages.add(gridPage)
-            pages.add(gridPage)
-        }
-
-        // 3. Optional App Library (rightmost page)
-        if (prefs.appLibraryEnabled) {
-            val lib = IosAppLibraryPage(this).apply {
-                onAppClick = { app, anchor ->
-                    launchAppByComponent(app.packageName, app.className, app.label, anchor)
-                }
-                onAppLongClick = { app, anchor ->
-                    IosDesign.hapticLongPress(anchor, prefs.hapticsEnabled)
-                    showAppContextMenu(app.packageName, app.className, app.label, homeItem = null, dockSlot = null)
-                }
-                onOpenCategory = { title, apps ->
-                    openCategoryFolderModal(title, apps)
-                }
-                onOpenHiddenFolder = {
-                    openHiddenAppsWithBiometric()
-                }
-            }
+            val lib = getOrCreateAppLibraryPage()
             lib.bind(
                 apps = installedApps,
                 hidden = prefs.hiddenPackages,
                 usage = usageScores,
                 cache = iconCache,
                 glassTheme = prefs.glassThemeStyle,
-                iconTheme = prefs.iconThemeStyle
+                iconTheme = prefs.iconThemeStyle,
+                isCleanMode = true,
+                renderNow = true
+            )
+            appLibraryPage = lib
+            pages.add(lib)
+
+            pager.setPages(pages, initialPage = 0)
+            dockView.visibility = View.GONE
+            searchPill.visibility = View.GONE
+            applyGlassThemeToChrome()
+            applySafeInsets(safeInsets)
+            updateWindowWallpaperBlur(activePageIndex = 0)
+            return
+        }
+
+        currentHomePageOffset = if (prefs.todayViewEnabled) 1 else 0
+
+        // 1. Optional Today View (leftmost page)
+        if (prefs.todayViewEnabled) {
+            val tv = getOrCreateTodayViewPage()
+            tv.applyGlassTheme(prefs.glassThemeStyle, prefs.iconThemeStyle)
+            todayViewPage = tv
+            pages.add(tv)
+        } else {
+            todayViewPage = null
+        }
+
+        // 2. Home Screen Grid Pages (0 .. pagesCount - 1) - pre-grouped O(N) once
+        val itemsByPage = workspace.items.groupBy { it.page }
+        val count = workspace.pagesCount.coerceAtLeast(1)
+        for (p in 0 until count) {
+            val gridPage = createHomeGridPage(p, itemsByPage[p].orEmpty())
+            homeGridPages.add(gridPage)
+            pages.add(gridPage)
+        }
+
+        // 3. Optional App Library (rightmost page, lazy-rendered until visible)
+        if (prefs.appLibraryEnabled) {
+            val appLibPageIdx = currentHomePageOffset + count
+            val isViewingAppLib = preserveCurrentPage && prevPage == appLibPageIdx
+            val lib = getOrCreateAppLibraryPage()
+            lib.bind(
+                apps = installedApps,
+                hidden = prefs.hiddenPackages,
+                usage = usageScores,
+                cache = iconCache,
+                glassTheme = prefs.glassThemeStyle,
+                iconTheme = prefs.iconThemeStyle,
+                isCleanMode = false,
+                renderNow = isViewingAppLib
             )
             appLibraryPage = lib
             pages.add(lib)
@@ -735,37 +822,35 @@ class MainActivity : ComponentActivity() {
         bindDock()
         applyGlassThemeToChrome()
         applySafeInsets(safeInsets)
+        updateWindowWallpaperBlur(activePageIndex = targetPage)
     }
 
     private fun rebuildHomeGridOnly() {
+        val itemsByPage = workspace.items.groupBy { it.page }
         homeGridPages.forEach { gridPage ->
-            populateGridPage(gridPage)
+            populateGridPage(gridPage, itemsByPage[gridPage.pageIndex].orEmpty())
         }
     }
 
-    private fun createHomeGridPage(pageIndex: Int): IosHomeGridPage {
+    private fun createHomeGridPage(pageIndex: Int, pageItems: List<HomeItem>): IosHomeGridPage {
         return IosHomeGridPage(this, pageIndex, prefs.gridCols, prefs.gridRows).also {
-            populateGridPage(it)
+            populateGridPage(it, pageItems)
         }
     }
 
-    private fun populateGridPage(gridPage: IosHomeGridPage) {
+    private fun populateGridPage(gridPage: IosHomeGridPage, pageItems: List<HomeItem>) {
         gridPage.removeAllViews()
-        val pageItems = workspace.items.filter { it.page == gridPage.pageIndex }
         val isLarge = prefs.iconSizeMode == IconSizeMode.LARGE
         val isDarkFolder = prefs.iconThemeStyle != IconThemeStyle.LIGHT || prefs.glassThemeStyle == GlassThemeStyle.OBSIDIAN_GLASS
-        val isLiquidFolder = prefs.glassThemeStyle == GlassThemeStyle.LIQUID_GLASS
 
         for (item in pageItems) {
             val view: View = when (item) {
                 is HomeItem.AppShortcut -> IosAppIconView(this).apply {
                     itemId = item.id
-                    packageNameRef = item.packageName
-                    classNameRef = item.className
                     label = item.label
                     showLabel = prefs.showAppLabels
                     largeMode = isLarge
-                    iconBitmap = iconCache.getIcon(item.packageName, item.className, item.label)
+                    bindIconAsync(iconCache, item.packageName, item.className, item.label)
                     badgeCount = if (prefs.showBadges) BadgeStore.countForPackage(item.packageName) else 0
                     setJiggling(isJiggleMode)
                     setOnClickListener {
@@ -795,8 +880,19 @@ class MainActivity : ComponentActivity() {
                     showLabel = prefs.showAppLabels
                     largeMode = isLarge
                     darkGlassFolder = isDarkFolder
-                    liquidGlassFolder = isLiquidFolder
-                    folderIcons = item.apps.take(9).map { iconCache.getIcon(it.packageName, it.className, it.label) }
+                    glassThemeStyle = prefs.glassThemeStyle
+                    val previewApps = item.apps.take(9)
+                    val initialIcons = previewApps.mapNotNull { iconCache.getCachedIcon(it.packageName, it.className) }
+                    folderIcons = initialIcons
+                    if (initialIcons.size < previewApps.size) {
+                        val loaded = arrayOfNulls<android.graphics.Bitmap>(previewApps.size)
+                        previewApps.forEachIndexed { idx, child ->
+                            iconCache.loadIconAsync(child.packageName, child.className, child.label) { bmp ->
+                                loaded[idx] = bmp
+                                folderIcons = loaded.filterNotNull()
+                            }
+                        }
+                    }
                     badgeCount = if (prefs.showBadges) {
                         BadgeStore.countForPackages(item.apps.map { it.packageName })
                     } else 0
@@ -866,6 +962,9 @@ class MainActivity : ComponentActivity() {
     private fun applyGlassThemeToChrome() {
         dockView.applyGlassStyle(prefs.iconThemeStyle, prefs.blurEnabled, prefs.glassThemeStyle)
         searchPill.glassThemeStyle = prefs.glassThemeStyle
+        editPillBtn.background = IosDesign.createThemeSurface(this, 999f, prefs.glassThemeStyle, prefs.iconThemeStyle)
+        donePillBtn.background = IosDesign.createThemeSurface(this, 999f, prefs.glassThemeStyle, prefs.iconThemeStyle)
+        todayViewPage?.applyGlassTheme(prefs.glassThemeStyle, prefs.iconThemeStyle)
         folderOverlay.applyGlassTheme(prefs.glassThemeStyle, prefs.iconThemeStyle)
         spotlightOverlay.applyGlassTheme(prefs.glassThemeStyle, prefs.iconThemeStyle)
         contextMenuOverlay.applyGlassTheme(prefs.glassThemeStyle, prefs.iconThemeStyle)
@@ -876,7 +975,7 @@ class MainActivity : ComponentActivity() {
     // -------------------------------------------------------------------------
 
     private fun enterJiggleMode() {
-        if (isJiggleMode) return
+        if (isJiggleMode || prefs.cleanModeEnabled) return
         isJiggleMode = true
         editTopBar.visibility = View.VISIBLE
         homeGridPages.forEach { it.setJiggleMode(true) }
@@ -1028,6 +1127,7 @@ class MainActivity : ComponentActivity() {
         if (item is HomeItem.AppShortcut && dockRect.contains(rawX, rawY)) {
             pinAppToDock(item.packageName, item.className, item.label)
             workspace.items.removeAll { it.id == item.id }
+            compactIfAutoArrange()
             repository.saveWorkspaceAsync(workspace)
             rebuildWorkspacePages(preserveCurrentPage = true)
             return
@@ -1073,7 +1173,7 @@ class MainActivity : ComponentActivity() {
                     item.row = targetRow
                 }
             }
-            workspace.pagesCount = ((workspace.items.maxOfOrNull { it.page } ?: 0) + 1).coerceAtLeast(1)
+            compactIfAutoArrange()
             repository.saveWorkspaceAsync(workspace)
         }
         rebuildWorkspacePages(preserveCurrentPage = true)
@@ -1103,7 +1203,7 @@ class MainActivity : ComponentActivity() {
                 } else if (homeGridPages.size < 8) {
                     // Add a new blank Home page without detaching the currently dragged view!
                     val newHomeIdx = homeGridPages.size
-                    val newGridPage = createHomeGridPage(newHomeIdx)
+                    val newGridPage = createHomeGridPage(newHomeIdx, emptyList())
                     val dockBottomMargin = maxOf(safeInsets.navBarBottom, IosDesign.dpInt(this, 10f)) + IosDesign.dpInt(this, 10f)
                     val dockHeight = IosDesign.dpInt(this, 86f)
                     val gridTop = safeInsets.statusBarTop + IosDesign.dpInt(this, 14f)
@@ -1271,19 +1371,25 @@ class MainActivity : ComponentActivity() {
 
         val actions = mutableListOf<IosContextMenuOverlay.MenuAction>()
 
-        actions.add(IosContextMenuOverlay.MenuAction("Edit Home Screen", "⊞") {
-            enterJiggleMode()
-        })
-
-        if (dockSlot == null && !inDock) {
-            actions.add(IosContextMenuOverlay.MenuAction("Pin to Dock", "⬇") {
-                pinAppToDock(packageName, className, label)
+        if (!prefs.cleanModeEnabled) {
+            actions.add(IosContextMenuOverlay.MenuAction("Edit Home Screen", "⊞") {
+                enterJiggleMode()
             })
-        } else if (dockSlot != null) {
-            actions.add(IosContextMenuOverlay.MenuAction("Remove from Dock", "✕") {
-                workspace.dock.removeAll { it.componentKey == dockSlot.componentKey }
-                repository.saveWorkspaceAsync(workspace)
-                bindDock()
+
+            if (dockSlot == null && !inDock) {
+                actions.add(IosContextMenuOverlay.MenuAction("Pin to Dock", "⬇") {
+                    pinAppToDock(packageName, className, label)
+                })
+            } else if (dockSlot != null) {
+                actions.add(IosContextMenuOverlay.MenuAction("Remove from Dock", "✕") {
+                    workspace.dock.removeAll { it.componentKey == dockSlot.componentKey }
+                    repository.saveWorkspaceAsync(workspace)
+                    bindDock()
+                })
+            }
+        } else {
+            actions.add(IosContextMenuOverlay.MenuAction("iOSpring Settings", "⚙") {
+                openSettings()
             })
         }
 
@@ -1315,6 +1421,7 @@ class MainActivity : ComponentActivity() {
         if (homeItem != null) {
             actions.add(IosContextMenuOverlay.MenuAction("Remove from Home", "−", isDestructive = true) {
                 workspace.items.removeAll { it.id == homeItem.id }
+                compactIfAutoArrange()
                 repository.saveWorkspaceAsync(workspace)
                 rebuildWorkspacePages(preserveCurrentPage = true)
             })
@@ -1337,6 +1444,7 @@ class MainActivity : ComponentActivity() {
             IosContextMenuOverlay.MenuAction("Add Another Widget", "+") { showAddWidgetDialog() },
             IosContextMenuOverlay.MenuAction("Remove Widget", "−", isDestructive = true) {
                 workspace.items.removeAll { it.id == item.id }
+                compactIfAutoArrange()
                 repository.saveWorkspaceAsync(workspace)
                 rebuildWorkspacePages(preserveCurrentPage = true)
             }
@@ -1469,6 +1577,7 @@ class MainActivity : ComponentActivity() {
             .setMessage("Removing from the Home Screen keeps the app inside your App Library.")
             .setPositiveButton("Remove") { _, _ ->
                 workspace.items.removeAll { it.id == item.id }
+                compactIfAutoArrange()
                 repository.saveWorkspaceAsync(workspace)
                 rebuildWorkspacePages(preserveCurrentPage = true)
             }
@@ -1542,6 +1651,9 @@ class MainActivity : ComponentActivity() {
             spotlightOverlay.isOpen -> spotlightOverlay.dismiss()
             folderOverlay.isOpen -> folderOverlay.dismiss()
             isJiggleMode -> exitJiggleMode()
+            prefs.cleanModeEnabled -> {
+                appLibraryPage?.resetToCategories()
+            }
             pager.activePageIndex != currentHomePageOffset -> {
                 pager.scrollToPage(currentHomePageOffset, animate = true)
             }
@@ -1555,17 +1667,30 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handlePageSettled(pageIdx: Int) {
+        if (prefs.cleanModeEnabled) {
+            appLibraryPage?.ensureRendered()
+            updateWindowWallpaperBlur(activePageIndex = pageIdx)
+            return
+        }
         val homeIdx = pageIdx - currentHomePageOffset
         if (homeIdx in 0 until homeGridPages.size) {
             searchPill.showPageDotsTemporarily(homeIdx)
         }
         val appLibIdx = if (prefs.appLibraryEnabled) currentHomePageOffset + homeGridPages.size else -1
-        if (pageIdx != appLibIdx) {
+        if (pageIdx == appLibIdx) {
+            appLibraryPage?.ensureRendered()
+        } else {
             appLibraryPage?.clearSearchFocus()
         }
+        updateWindowWallpaperBlur(activePageIndex = pageIdx)
     }
 
     private fun updateDockAndPillVisibility(scrollPx: Float, pageW: Int) {
+        if (prefs.cleanModeEnabled) {
+            if (dockView.visibility != View.GONE) dockView.visibility = View.GONE
+            if (searchPill.visibility != View.GONE) searchPill.visibility = View.GONE
+            return
+        }
         if (pageW <= 0) return
         val firstHomePx = currentHomePageOffset * pageW.toFloat()
         val lastHomePx = (currentHomePageOffset + homeGridPages.size - 1) * pageW.toFloat()
@@ -1585,12 +1710,30 @@ class MainActivity : ComponentActivity() {
         searchPill.isClickable = alphaFactor > 0.5f
     }
 
+    private fun updateWindowWallpaperBlur(activePageIndex: Int = pager.activePageIndex) {
+        if (overlayBlurActive) {
+            ColorOsCompat.setWindowBackgroundBlur(
+                this,
+                IosDesign.windowBlurRadiusFor(prefs.glassThemeStyle, strong = true),
+                prefs.blurEnabled
+            )
+            return
+        }
+        val onBlurPage = prefs.cleanModeEnabled ||
+            (prefs.todayViewEnabled && activePageIndex == 0) ||
+            (prefs.appLibraryEnabled && activePageIndex == currentHomePageOffset + homeGridPages.size)
+        val radius = if (onBlurPage) IosDesign.windowBlurRadiusFor(prefs.glassThemeStyle, strong = false) else 0
+        ColorOsCompat.setWindowBackgroundBlur(this, radius, prefs.blurEnabled)
+    }
+
     private fun setOverlayBlur(active: Boolean) {
         if (overlayBlurActive == active) return
         overlayBlurActive = active
         val blurRadius = if (active) IosDesign.blurRadiusFor(prefs.glassThemeStyle, strong = true) else 0f
-        ColorOsCompat.applyContentBlur(workspaceBlurContainer, blurRadius, prefs.blurEnabled)
+        val vibrancy = IosDesign.vibrancySaturationFor(prefs.glassThemeStyle)
+        ColorOsCompat.applyContentBlur(workspaceBlurContainer, blurRadius, prefs.blurEnabled, vibrancy)
         ColorOsCompat.setWallpaperZoom(this, rootFrame, if (active) 0.45f else 0f)
+        updateWindowWallpaperBlur()
     }
 
     private fun refreshBadgesInPlace() {

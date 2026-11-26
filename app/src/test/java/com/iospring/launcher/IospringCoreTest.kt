@@ -16,6 +16,7 @@ import com.iospring.launcher.model.BuiltInWidgetType
 import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.HomeItem
 import com.iospring.launcher.model.LauncherPreferences
+import com.iospring.launcher.model.LauncherWorkspaceState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -177,27 +178,78 @@ class IospringCoreTest {
     }
 
     @Test
-    fun builtInIosIconPackMatchesPopularAppsAndPreservesUnknownGames() {
+    fun builtInIosIconPackMatchesPopularAppsAndPreservesPlayStoreBrowsersAndGames() {
         assertEquals(IosIconPackRenderer.IconGlyph.WHATSAPP, IosIconPackRenderer.matchGlyph("com.whatsapp", "WhatsApp"))
         assertEquals(IosIconPackRenderer.IconGlyph.INSTAGRAM, IosIconPackRenderer.matchGlyph("com.instagram.android", "Instagram"))
         assertEquals(IosIconPackRenderer.IconGlyph.YOUTUBE, IosIconPackRenderer.matchGlyph("com.google.android.youtube", "YouTube"))
         assertEquals(IosIconPackRenderer.IconGlyph.TIKTOK, IosIconPackRenderer.matchGlyph("com.ss.android.ugc.trill", "TikTok"))
         assertEquals(IosIconPackRenderer.IconGlyph.SPOTIFY, IosIconPackRenderer.matchGlyph("com.spotify.music", "Spotify"))
-        assertEquals(IosIconPackRenderer.IconGlyph.BROWSER, IosIconPackRenderer.matchGlyph("com.android.chrome", "Chrome"))
         assertEquals(IosIconPackRenderer.IconGlyph.CAMERA, IosIconPackRenderer.matchGlyph("com.oplus.camera", "Camera"))
         assertEquals(IosIconPackRenderer.IconGlyph.SETTINGS, IosIconPackRenderer.matchGlyph("com.android.settings", "Settings"))
         assertEquals(IosIconPackRenderer.IconGlyph.SHOPPING, IosIconPackRenderer.matchGlyph("com.shopee.id", "Shopee"))
         assertEquals(IosIconPackRenderer.IconGlyph.RIDE_HAILING, IosIconPackRenderer.matchGlyph("com.gojek.app", "Gojek"))
         assertEquals(IosIconPackRenderer.IconGlyph.WALLET, IosIconPackRenderer.matchGlyph("id.dana", "DANA"))
+
+        // Play Store & Browsers keep their own authentic icons styled with iOS squircle & glass rim
+        assertNull(IosIconPackRenderer.matchGlyph("com.android.vending", "Play Store"))
+        assertNull(IosIconPackRenderer.matchGlyph("com.android.chrome", "Chrome"))
+        assertNull(IosIconPackRenderer.matchGlyph("org.mozilla.firefox", "Firefox"))
+        assertNull(IosIconPackRenderer.matchGlyph("com.brave.browser", "Brave"))
+        assertNull(IosIconPackRenderer.matchGlyph("com.opera.browser", "Opera"))
+        assertNull(IosIconPackRenderer.matchGlyph("com.microsoft.emmx", "Edge"))
+        assertNull(IosIconPackRenderer.matchGlyph("com.heytap.browser", "Browser"))
         assertNull(IosIconPackRenderer.matchGlyph("com.mobile.legends", "Mobile Legends"))
     }
 
     @Test
-    fun launcherPreferencesEnableLabelsIconPackAndKeepInRamByDefault() {
+    fun autoArrangeCompactsEmptySpacesAfterUninstallWhilePreservingWidgets() {
+        val widget = HomeItem.BuiltInWidgetItem(
+            id = "w1", page = 0, col = 0, row = 0, spanX = 2, spanY = 2,
+            widgetType = BuiltInWidgetType.CLOCK_2X2
+        )
+        // Simulate empty holes at (2,0), (0,2), (1,2) after uninstalls + an app stranded on page 1
+        val appA = HomeItem.AppShortcut("a1", page = 0, col = 3, row = 0, "com.a", ".A", "App A")
+        val appB = HomeItem.AppShortcut("a2", page = 0, col = 2, row = 2, "com.b", ".B", "App B")
+        val appC = HomeItem.AppShortcut("a3", page = 1, col = 2, row = 3, "com.c", ".C", "App C")
+        val state = LauncherWorkspaceState(
+            pagesCount = 2,
+            items = mutableListOf(widget, appA, appB, appC)
+        )
+
+        GridOccupancy.compactWorkspace(state, cols = 4, rows = 6)
+
+        // Widget stays cleanly at (0,0)
+        assertEquals(0, widget.page)
+        assertEquals(0, widget.col)
+        assertEquals(0, widget.row)
+
+        // Apps flow sequentially into the earliest vacant cells around the 2x2 widget with zero gaps
+        assertEquals(0, appA.page)
+        assertEquals(2, appA.col)
+        assertEquals(0, appA.row)
+
+        assertEquals(0, appB.page)
+        assertEquals(3, appB.col)
+        assertEquals(0, appB.row)
+
+        assertEquals(0, appC.page)
+        assertEquals(2, appC.col)
+        assertEquals(1, appC.row)
+
+        // Empty page 1 collapsed automatically
+        assertEquals(1, state.pagesCount)
+    }
+
+    @Test
+    fun launcherPreferencesDefaultsAndGlassThemesAreValid() {
         val defaults = LauncherPreferences()
         assertTrue(defaults.showAppLabels)
         assertTrue(defaults.iosIconPackEnabled)
         assertTrue(defaults.keepInRamEnabled)
+        assertTrue(defaults.autoArrangeIcons)
+        assertFalse(defaults.cleanModeEnabled)
         assertEquals(GlassThemeStyle.LIQUID_GLASS, defaults.glassThemeStyle)
+        assertTrue(GlassThemeStyle.entries.contains(GlassThemeStyle.FROSTED_GLASS))
+        assertTrue(GlassThemeStyle.entries.contains(GlassThemeStyle.FROSTED_BLUR))
     }
 }

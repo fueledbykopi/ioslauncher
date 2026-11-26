@@ -169,7 +169,7 @@ class IosFolderOverlayView(context: Context) : FrameLayout(context) {
                 label = app.label
                 showLabel = showLabels
                 largeMode = largeIcons
-                iconBitmap = iconCache.getIcon(app.packageName, app.className, app.label)
+                bindIconAsync(iconCache, app.packageName, app.className, app.label)
                 badgeCount = if (showBadges) BadgeStore.countForPackage(app.packageName) else 0
                 setJiggling(jiggleMode)
                 setOnClickListener {

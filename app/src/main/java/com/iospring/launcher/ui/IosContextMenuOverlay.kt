@@ -42,7 +42,12 @@ class IosContextMenuOverlay(context: Context) : FrameLayout(context) {
     }
 
     fun applyGlassTheme(glassStyle: GlassThemeStyle, iconStyle: IconThemeStyle) {
-        val effectiveIcon = if (glassStyle == GlassThemeStyle.LIQUID_GLASS) IconThemeStyle.DARK else iconStyle
+        val effectiveIcon = when (glassStyle) {
+            GlassThemeStyle.LIQUID_GLASS,
+            GlassThemeStyle.OBSIDIAN_GLASS -> IconThemeStyle.DARK
+            GlassThemeStyle.FROSTED_GLASS,
+            GlassThemeStyle.FROSTED_BLUR -> IconThemeStyle.DARK // Keep crisp white menu labels high-contrast on dark frosted glass
+        }
         card.background = IosDesign.createThemeSurface(
             context = context,
             cornerRadiusDp = 22f,

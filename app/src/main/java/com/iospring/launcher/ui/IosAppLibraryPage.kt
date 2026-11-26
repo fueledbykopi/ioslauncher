@@ -6,8 +6,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.Typeface
 import android.text.Editable
+import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.MotionEvent
@@ -25,11 +25,15 @@ import com.iospring.launcher.model.AppCategory
 import com.iospring.launcher.model.AppEntry
 import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.IconThemeStyle
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
- * Rightmost iOS 18 App Library Page.
+ * Rightmost iOS 18+ App Library Page (also serves as the sole screen in Clean Mode).
  * - Auto-categorized 2x2 iOS category folders (3 big icons + 1 mini 2x2 quad cluster)
- * - Top Search Bar switches cleanly to Alphabetical A-Z List with right-side Fast-Scroll Index
+ * - Crisp non-clipped Search Bar switches smoothly to Alphabetical A-Z List with Fast-Scroll Index
+ * - Async off-thread icon loading for instant startup & zero main-thread stutter
  * - Bottom iOS 18 "Hidden" Folder unlocked via BiometricPrompt
  */
 class IosAppLibraryPage(context: Context) : FrameLayout(context) {
@@ -38,6 +42,7 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
     var onAppLongClick: ((AppEntry, View) -> Unit)? = null
     var onOpenCategory: ((title: String, apps: List<AppEntry>) -> Unit)? = null
     var onOpenHiddenFolder: (() -> Unit)? = null
+    var onOpenSettings: (() -> Unit)? = null
 
     private var allApps: List<AppEntry> = emptyList()
     private var hiddenPackages: Set<String> = emptySet()
@@ -45,35 +50,41 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
     private var iconCache: IconCacheManager? = null
     private var glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
     private var iconStyle: IconThemeStyle = IconThemeStyle.LIGHT
+    private var cleanMode: Boolean = false
 
     private var isListMode: Boolean = false
+    private var foldersDirty: Boolean = true
     private var alphaListDirty: Boolean = true
-    private lateinit var searchBox: FrameLayout
+    private var searchDebounceRunnable: Runnable? = null
+    private lateinit var searchBox: LinearLayout
+    private lateinit var settingsBtn: SettingsGearButton
 
     private val mainColumn = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
     }
 
     private val searchEdit = EditText(context).apply {
-        hint = "🔍  App Library"
+        hint = "Search App Library"
         setTextColor(Color.WHITE)
         setHintTextColor(0xB3FFFFFF.toInt())
-        textSize = 16f
-        gravity = Gravity.CENTER
+        textSize = 15.5f
+        gravity = Gravity.CENTER_VERTICAL
         background = null
+        setPadding(0, 0, 0, 0)
+        includeFontPadding = false
         isSingleLine = true
+        ellipsize = TextUtils.TruncateAt.END
     }
 
     private val toggleModeBtn = TextView(context).apply {
         text = "A-Z"
         setTextColor(Color.WHITE)
         textSize = 13f
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
         gravity = Gravity.CENTER
         background = IosDesign.createPillDrawable(context, 0x33FFFFFF, 0x33FFFFFF)
         val hp = IosDesign.dpInt(context, 12f)
-        val vp = IosDesign.dpInt(context, 6f)
-        setPadding(hp, vp, hp, vp)
+        setPadding(hp, 0, hp, 0)
     }
 
     private val folderScroll = ScrollView(context).apply {
@@ -99,20 +110,39 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         val padH = IosDesign.dpInt(context, 16f)
         mainColumn.setPadding(padH, IosDesign.dpInt(context, 48f), padH, IosDesign.dpInt(context, 90f))
 
-        // Top App Library Search Bar + A-Z Toggle
+        // Top App Library Search Bar + A-Z Toggle + Clean Mode Settings button
         val barRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        searchBox = FrameLayout(context).apply {
+        searchBox = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
-            val hp = IosDesign.dpInt(context, 14f)
+            val hp = IosDesign.dpInt(context, 13f)
             setPadding(hp, 0, hp, 0)
-            addView(searchEdit, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            val glyphSize = IosDesign.dpInt(context, 17f)
+            addView(SearchMagnifierView(context), LinearLayout.LayoutParams(glyphSize, glyphSize).apply {
+                marginEnd = IosDesign.dpInt(context, 8f)
+            })
+            addView(searchEdit, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
         }
-        barRow.addView(searchBox, LinearLayout.LayoutParams(0, IosDesign.dpInt(context, 44f), 1f))
+        settingsBtn = SettingsGearButton(context).apply {
+            visibility = GONE
+            background = IosDesign.createThemeSurface(context, 999f, glassStyle, iconStyle)
+            contentDescription = "iOSpring Settings"
+            setOnClickListener { onOpenSettings?.invoke() }
+        }
+
+        val barH = IosDesign.dpInt(context, 44f)
+        barRow.addView(searchBox, LinearLayout.LayoutParams(0, barH, 1f))
         barRow.addView(toggleModeBtn, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, IosDesign.dpInt(context, 36f)
+            LinearLayout.LayoutParams.WRAP_CONTENT, IosDesign.dpInt(context, 38f)
+        ).apply {
+            marginStart = IosDesign.dpInt(context, 8f)
+        })
+        barRow.addView(settingsBtn, LinearLayout.LayoutParams(
+            IosDesign.dpInt(context, 38f), IosDesign.dpInt(context, 38f)
         ).apply {
             marginStart = IosDesign.dpInt(context, 8f)
         })
@@ -163,8 +193,14 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
                 if (q.isNotEmpty() && !isListMode) {
                     setListMode(true)
                 }
-                alphaListDirty = false
-                renderAlphaList(q)
+                searchDebounceRunnable?.let { removeCallbacks(it) }
+                val task = Runnable {
+                    searchDebounceRunnable = null
+                    alphaListDirty = false
+                    renderAlphaList(q)
+                }
+                searchDebounceRunnable = task
+                postDelayed(task, 50L)
             }
         })
 
@@ -187,7 +223,9 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         usage: Map<String, Long>,
         cache: IconCacheManager,
         glassTheme: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS,
-        iconTheme: IconThemeStyle = IconThemeStyle.LIGHT
+        iconTheme: IconThemeStyle = IconThemeStyle.LIGHT,
+        isCleanMode: Boolean = false,
+        renderNow: Boolean = isCleanMode
     ) {
         allApps = apps
         hiddenPackages = hidden
@@ -195,11 +233,30 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         iconCache = cache
         glassStyle = glassTheme
         iconStyle = iconTheme
+        cleanMode = isCleanMode
+
         searchBox.background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
         toggleModeBtn.background = IosDesign.createThemeSurface(context, 999f, glassStyle, iconStyle)
+        settingsBtn.background = IosDesign.createThemeSurface(context, 999f, glassStyle, iconStyle)
+        settingsBtn.visibility = if (cleanMode) VISIBLE else GONE
+
+        foldersDirty = true
         alphaListDirty = true
-        renderCategoryFolders()
-        if (isListMode) {
+        if (renderNow) {
+            ensureRendered()
+        }
+    }
+
+    /**
+     * Lazy-materializes App Library views on demand so Home Screen cold start
+     * never wastes CPU/RAM building off-screen App Library cards until needed.
+     */
+    fun ensureRendered() {
+        if (foldersDirty) {
+            foldersDirty = false
+            renderCategoryFolders()
+        }
+        if (isListMode && alphaListDirty) {
             alphaListDirty = false
             renderAlphaList(searchEdit.text?.toString().orEmpty())
         }
@@ -211,6 +268,20 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
             imm?.hideSoftInputFromWindow(searchEdit.windowToken, 0)
             searchEdit.clearFocus()
         }
+    }
+
+    fun resetToCategories(): Boolean {
+        if (isListMode || searchEdit.hasFocus()) {
+            setListMode(false)
+            return true
+        }
+        return false
+    }
+
+    override fun onDetachedFromWindow() {
+        searchDebounceRunnable?.let { removeCallbacks(it) }
+        searchDebounceRunnable = null
+        super.onDetachedFromWindow()
     }
 
     private fun setListMode(listMode: Boolean) {
@@ -230,6 +301,10 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
                 searchEdit.setText("")
             }
             searchEdit.clearFocus()
+            if (foldersDirty) {
+                foldersDirty = false
+                renderCategoryFolders()
+            }
         }
     }
 
@@ -313,16 +388,14 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
 
         val cellSize = ((cardW - IosDesign.dpInt(context, 36f)) / 2).coerceAtLeast(48)
 
-        // First 3 slots: direct-launch big icons
+        // First 3 slots: direct-launch big icons (async non-blocking icon load)
         for (i in 0 until 3) {
             val slotView: View = if (i < apps.size) {
                 val app = apps[i]
                 IosAppIconView(context).apply {
-                    packageNameRef = app.packageName
-                    classNameRef = app.className
                     showLabel = false
                     largeMode = true
-                    iconBitmap = cache.getIcon(app.packageName, app.className, app.label)
+                    bindIconAsync(cache, app.packageName, app.className, app.label)
                     setOnClickListener { onAppClick?.invoke(app, this) }
                     setOnLongClickListener {
                         onAppLongClick?.invoke(app, this)
@@ -343,17 +416,20 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
             apps.size == 4 -> {
                 val app = apps[3]
                 IosAppIconView(context).apply {
-                    packageNameRef = app.packageName
-                    classNameRef = app.className
                     showLabel = false
                     largeMode = true
-                    iconBitmap = cache.getIcon(app.packageName, app.className, app.label)
+                    bindIconAsync(cache, app.packageName, app.className, app.label)
                     setOnClickListener { onAppClick?.invoke(app, this) }
+                    setOnLongClickListener {
+                        onAppLongClick?.invoke(app, this)
+                        true
+                    }
                 }
             }
             apps.size > 4 -> {
-                val miniBitmaps = apps.drop(3).take(4).map { cache.getIcon(it.packageName, it.className, it.label) }
-                MiniQuadClusterView(context, miniBitmaps).apply {
+                val quadApps = apps.drop(3).take(4)
+                MiniQuadClusterView(context, quadApps.size).apply {
+                    bindIconsAsync(quadApps, cache)
                     setOnClickListener { onOpenCategory?.invoke(title, apps) }
                 }
             }
@@ -369,9 +445,10 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
             text = title
             setTextColor(Color.WHITE)
             textSize = 12.5f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = IosDesign.TYPEFACE_MEDIUM
             gravity = Gravity.CENTER
             maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
             setShadowLayer(4f, 0f, 1.5f, 0x99000000.toInt())
             setPadding(0, IosDesign.dpInt(context, 6f), 0, 0)
         })
@@ -385,14 +462,14 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
             setOnClickListener { onOpenHiddenFolder?.invoke() }
         }
         val box = FrameLayout(context).apply {
-            background = IosDesign.createGlassDrawable(context, 26f, 0x481C1C1E, 0x38FFFFFF)
+            background = IosDesign.createThemeSurface(context, 28f, glassStyle, IconThemeStyle.DARK)
         }
         val lockInfo = TextView(context).apply {
             text = "🔒\nBiometric\n($hiddenCount)"
             setTextColor(0xDDFFFFFF.toInt())
             textSize = 13f
             gravity = Gravity.CENTER
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = IosDesign.TYPEFACE_MEDIUM
         }
         box.addView(lockInfo, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         wrapper.addView(box, LinearLayout.LayoutParams(cardW, cardW))
@@ -400,7 +477,7 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
             text = "Hidden"
             setTextColor(Color.WHITE)
             textSize = 12.5f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = IosDesign.TYPEFACE_MEDIUM
             gravity = Gravity.CENTER
             setPadding(0, IosDesign.dpInt(context, 6f), 0, 0)
         })
@@ -413,10 +490,22 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         val cache = iconCache ?: return
 
         val q = query.trim().lowercase()
-        val filtered = allApps
-            .filterNot { it.packageName in hiddenPackages }
-            .filter { q.isEmpty() || it.label.lowercase().contains(q) || it.packageName.lowercase().contains(q) }
-            .sortedBy { it.label.lowercase() }
+        val filtered = ArrayList<AppEntry>(allApps.size)
+        for (i in allApps.indices) {
+            val app = allApps[i]
+            if (app.packageName in hiddenPackages) continue
+            if (q.isEmpty() || app.lowerLabel.contains(q) || app.lowerPackage.contains(q)) {
+                filtered.add(app)
+            }
+        }
+        filtered.sortBy { it.lowerLabel }
+
+        val rowPad = IosDesign.dpInt(context, 8f)
+        val iconSz = IosDesign.dpInt(context, 44f)
+        val textPadStart = IosDesign.dpInt(context, 14f)
+        val hdrPadStart = IosDesign.dpInt(context, 8f)
+        val hdrPadTop = IosDesign.dpInt(context, 12f)
+        val hdrPadBot = IosDesign.dpInt(context, 4f)
 
         var lastLetter: Char? = null
         for (app in filtered) {
@@ -430,8 +519,8 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
                     text = firstChar.toString()
                     setTextColor(0xCCFFFFFF.toInt())
                     textSize = 14f
-                    typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-                    setPadding(IosDesign.dpInt(context, 8f), IosDesign.dpInt(context, 12f), 0, IosDesign.dpInt(context, 4f))
+                    typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
+                    setPadding(hdrPadStart, hdrPadTop, 0, hdrPadBot)
                 }
                 sectionHeaderViews[firstChar] = header
                 alphaListColumn.addView(header)
@@ -440,8 +529,7 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
             val row = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                val p = IosDesign.dpInt(context, 8f)
-                setPadding(p, p, p, p)
+                setPadding(rowPad, rowPad, rowPad, rowPad)
                 setOnClickListener { onAppClick?.invoke(app, this) }
                 setOnLongClickListener {
                     onAppLongClick?.invoke(app, this)
@@ -449,16 +537,27 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
                 }
             }
             val iv = ImageView(context).apply {
-                setImageBitmap(cache.getIcon(app.packageName, app.className, app.label))
+                tag = app.componentKey
+                val cached = cache.getCachedIcon(app.packageName, app.className)
+                if (cached != null) {
+                    setImageBitmap(cached)
+                } else {
+                    cache.loadIconAsync(app.packageName, app.className, app.label) { bmp ->
+                        if (tag == app.componentKey) {
+                            setImageBitmap(bmp)
+                        }
+                    }
+                }
             }
-            val iconSz = IosDesign.dpInt(context, 44f)
             row.addView(iv, LinearLayout.LayoutParams(iconSz, iconSz))
             row.addView(TextView(context).apply {
                 text = app.label
                 setTextColor(Color.WHITE)
                 textSize = 15.5f
-                typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-                setPadding(IosDesign.dpInt(context, 14f), 0, 0, 0)
+                typeface = IosDesign.TYPEFACE_REGULAR
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(textPadStart, 0, 0, 0)
             })
             alphaListColumn.addView(row)
         }
@@ -470,10 +569,28 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
 
     private class MiniQuadClusterView(
         context: Context,
-        private val icons: List<Bitmap>
+        slotCount: Int
     ) : View(context) {
+        private val icons = arrayOfNulls<Bitmap>(slotCount.coerceIn(0, 4))
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         private val rect = RectF()
+
+        fun bindIconsAsync(apps: List<AppEntry>, cache: IconCacheManager) {
+            val count = minOf(apps.size, icons.size)
+            for (i in 0 until count) {
+                val app = apps[i]
+                val cached = cache.getCachedIcon(app.packageName, app.className)
+                if (cached != null) {
+                    icons[i] = cached
+                } else {
+                    cache.loadIconAsync(app.packageName, app.className, app.label) { bmp ->
+                        icons[i] = bmp
+                        invalidate()
+                    }
+                }
+            }
+            invalidate()
+        }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
@@ -483,13 +600,71 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
             if (cell <= 0f) return
             val startX = (width - (cell * 2f + gap)) / 2f
             val startY = (height - (cell * 2f + gap)) / 2f
-            for (i in 0 until minOf(icons.size, 4)) {
+            for (i in icons.indices) {
+                val bmp = icons[i] ?: continue
                 val r = i / 2
                 val c = i % 2
                 val l = startX + c * (cell + gap)
                 val t = startY + r * (cell + gap)
                 rect.set(l, t, l + cell, t + cell)
-                canvas.drawBitmap(icons[i], null, rect, paint)
+                canvas.drawBitmap(bmp, null, rect, paint)
+            }
+        }
+    }
+
+    private class SearchMagnifierView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xCCFFFFFF.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = IosDesign.dp(context, 1.75f)
+            strokeCap = Paint.Cap.ROUND
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val s = minOf(width, height).toFloat()
+            if (s <= 0f) return
+            val r = s * 0.31f
+            val cx = s * 0.42f
+            val cy = s * 0.42f
+            canvas.drawCircle(cx, cy, r, paint)
+            canvas.drawLine(cx + r * 0.72f, cy + r * 0.72f, s * 0.86f, s * 0.86f, paint)
+        }
+    }
+
+    private class SettingsGearButton(context: Context) : View(context) {
+        private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xEEFFFFFF.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = IosDesign.dp(context, 1.8f)
+            strokeCap = Paint.Cap.ROUND
+        }
+
+        init {
+            isClickable = true
+            isFocusable = true
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val cx = width / 2f
+            val cy = height / 2f
+            val r = minOf(width, height) * 0.21f
+            if (r <= 0f) return
+            canvas.drawCircle(cx, cy, r, strokePaint)
+            val innerR = r * 1.15f
+            val outerR = r * 1.52f
+            for (i in 0 until 8) {
+                val a = (i * 45.0) * PI / 180.0
+                val cosA = cos(a).toFloat()
+                val sinA = sin(a).toFloat()
+                canvas.drawLine(
+                    cx + cosA * innerR,
+                    cy + sinA * innerR,
+                    cx + cosA * outerR,
+                    cy + sinA * outerR,
+                    strokePaint
+                )
             }
         }
     }
@@ -501,7 +676,7 @@ class IosAppLibraryPage(context: Context) : FrameLayout(context) {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xCCFFFFFF.toInt()
             textSize = IosDesign.sp(context, 10f)
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
             textAlign = Paint.Align.CENTER
         }
 

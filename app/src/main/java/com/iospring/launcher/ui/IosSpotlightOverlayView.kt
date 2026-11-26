@@ -3,9 +3,11 @@ package com.iospring.launcher.ui
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Typeface
+import android.graphics.Paint
 import android.text.Editable
+import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
@@ -56,12 +58,16 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
     }
 
     private val searchInput = EditText(context).apply {
-        hint = "Search apps, T9, or math..."
+        hint = "Search apps"
         setTextColor(Color.WHITE)
-        setHintTextColor(0x99FFFFFF.toInt())
-        textSize = 16f
+        setHintTextColor(0xA8FFFFFF.toInt())
+        textSize = 15.5f
+        gravity = Gravity.CENTER_VERTICAL
         background = null
+        setPadding(0, 0, 0, 0)
+        includeFontPadding = false
         isSingleLine = true
+        ellipsize = TextUtils.TruncateAt.END
         imeOptions = EditorInfo.IME_ACTION_SEARCH
     }
 
@@ -96,23 +102,23 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
-            setPadding(IosDesign.dpInt(context, 14f), IosDesign.dpInt(context, 8f), IosDesign.dpInt(context, 10f), IosDesign.dpInt(context, 8f))
+            minimumHeight = IosDesign.dpInt(context, 46f)
+            setPadding(IosDesign.dpInt(context, 13f), 0, IosDesign.dpInt(context, 10f), 0)
         }
 
-        val searchGlyph = TextView(context).apply {
-            text = "🔍"
-            textSize = 15f
-            setPadding(0, 0, IosDesign.dpInt(context, 8f), 0)
-        }
-        inputPill.addView(searchGlyph)
-        inputPill.addView(searchInput, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val searchGlyph = MagnifierIconView(context)
+        val glyphSize = IosDesign.dpInt(context, 18f)
+        inputPill.addView(searchGlyph, LinearLayout.LayoutParams(glyphSize, glyphSize).apply {
+            marginEnd = IosDesign.dpInt(context, 9f)
+        })
+        inputPill.addView(searchInput, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
         inputPill.addView(clearBtn, LinearLayout.LayoutParams(IosDesign.dpInt(context, 28f), IosDesign.dpInt(context, 28f)))
 
         val cancelBtn = TextView(context).apply {
             text = "Cancel"
             setTextColor(IosDesign.IOS_BLUE)
             textSize = 16f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = IosDesign.TYPEFACE_MEDIUM
             setPadding(IosDesign.dpInt(context, 14f), IosDesign.dpInt(context, 8f), 0, IosDesign.dpInt(context, 8f))
             setOnClickListener { dismiss() }
         }
@@ -177,8 +183,9 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
         inputPill.background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
         setBackgroundColor(
             when (glassStyle) {
-                GlassThemeStyle.LIQUID_GLASS -> 0x8A0C0E14.toInt()
-                GlassThemeStyle.FROSTED_BLUR -> 0xB80E0E12.toInt()
+                GlassThemeStyle.LIQUID_GLASS -> 0x820C0E14.toInt()
+                GlassThemeStyle.FROSTED_GLASS -> 0x9C101218.toInt()
+                GlassThemeStyle.FROSTED_BLUR -> 0xB60E0E14.toInt()
                 GlassThemeStyle.OBSIDIAN_GLASS -> 0xCC07070A.toInt()
             }
         )
@@ -288,13 +295,13 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
                 text = "CALCULATOR"
                 setTextColor(0x99FFFFFF.toInt())
                 textSize = 11f
-                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
             })
             mathCard.addView(TextView(context).apply {
                 text = "${res.mathExpression} = ${res.mathResult}"
                 setTextColor(Color.WHITE)
                 textSize = 24f
-                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
                 setPadding(0, IosDesign.dpInt(context, 4f), 0, 0)
             })
             resultsContainer.addView(mathCard, LinearLayout.LayoutParams(
@@ -324,7 +331,7 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
                     packageNameRef = app.packageName
                     classNameRef = app.className
                     label = app.label
-                    iconBitmap = cache.getIcon(app.packageName, app.className, app.label)
+                    bindIconAsync(cache, app.packageName, app.className, app.label)
                     setOnClickListener {
                         dismiss(immediate = true)
                         onAppSelected?.invoke(app, this)
@@ -349,7 +356,7 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
                 text = "🌐   Search the Web for \"$query\""
                 setTextColor(Color.WHITE)
                 textSize = 15f
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                typeface = IosDesign.TYPEFACE_MEDIUM
                 background = IosDesign.createThemeSurface(context, 18f, glassStyle, iconStyle)
                 val p = IosDesign.dpInt(context, 16f)
                 setPadding(p, IosDesign.dpInt(context, 14f), p, IosDesign.dpInt(context, 14f))
@@ -369,8 +376,28 @@ class IosSpotlightOverlayView(context: Context) : FrameLayout(context) {
             text = title
             setTextColor(0xB3FFFFFF.toInt())
             textSize = 12f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
             setPadding(IosDesign.dpInt(context, 6f), 0, 0, IosDesign.dpInt(context, 8f))
+        }
+    }
+
+    private class MagnifierIconView(context: Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xCCFFFFFF.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = IosDesign.dp(context, 1.8f)
+            strokeCap = Paint.Cap.ROUND
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val s = minOf(width, height).toFloat()
+            if (s <= 0f) return
+            val r = s * 0.31f
+            val cx = s * 0.42f
+            val cy = s * 0.42f
+            canvas.drawCircle(cx, cy, r, paint)
+            canvas.drawLine(cx + r * 0.72f, cy + r * 0.72f, s * 0.86f, s * 0.86f, paint)
         }
     }
 }

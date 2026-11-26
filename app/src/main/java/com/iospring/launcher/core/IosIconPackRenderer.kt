@@ -79,6 +79,16 @@ object IosIconPackRenderer {
         val lbl = label.lowercase(Locale.US)
 
         return when {
+            // Preserve authentic native icons for Play Store & Browser apps
+            // (SquircleIconRenderer still styles them with the latest iOS squircle, Light/Dark/Tinted & Glass rim!)
+            pkg == "com.android.vending" || lbl == "play store" || lbl == "google play" ||
+                lbl == "google play store" -> null
+            pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("firefox") ||
+                pkg.contains("brave") || pkg.contains("opera") || pkg.contains("emmx") ||
+                pkg.contains("duckduckgo") || pkg.contains("vivaldi") || pkg.contains("kiwibrowser") ||
+                pkg.contains("ucmobile") || pkg.contains("sbrowser") || pkg.contains("safari") ||
+                lbl == "browser" || lbl == "chrome" -> null
+
             // Specific popular third-party apps first (avoid generic keyword collisions)
             pkg.contains("whatsapp") -> IconGlyph.WHATSAPP
             pkg.contains("instagram") -> IconGlyph.INSTAGRAM
@@ -135,12 +145,9 @@ object IosIconPackRenderer {
             pkg.contains("maps") || pkg.contains("waze") || lbl == "maps" -> IconGlyph.MAPS
             pkg.contains("filemanager") || pkg.contains("documentsui") || pkg.contains("files") ||
                 lbl == "files" || lbl == "file manager" -> IconGlyph.FILES
-            pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("firefox") ||
-                pkg.contains("brave") || pkg.contains("opera") || pkg.contains("emmx") ||
-                pkg.contains("safari") -> IconGlyph.BROWSER
             pkg.contains("contacts") || lbl == "contacts" || lbl == "kontak" -> IconGlyph.CONTACTS
-            pkg == "com.android.vending" || pkg.contains("heytap.market") || pkg.contains("appmarket") ||
-                lbl == "play store" || lbl == "app market" -> IconGlyph.APP_STORE
+            pkg.contains("heytap.market") || pkg.contains("appmarket") ||
+                lbl == "app market" -> IconGlyph.APP_STORE
             pkg.contains("music") || pkg.contains("soundcloud") || pkg.contains("apple.android.music") -> IconGlyph.MUSIC
             pkg.contains("soundrecorder") || pkg.contains("voicerecorder") || pkg.contains("recorder") -> IconGlyph.RECORDER
             pkg.contains("compass") || lbl == "compass" || lbl == "kompas" -> IconGlyph.COMPASS

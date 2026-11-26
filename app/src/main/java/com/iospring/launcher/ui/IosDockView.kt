@@ -1,11 +1,10 @@
 package com.iospring.launcher.ui
 
 import android.content.Context
-import android.graphics.RenderEffect
-import android.graphics.Shader
-import android.os.Build
+import android.graphics.Outline
 import android.view.Gravity
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import com.iospring.launcher.core.IconCacheManager
@@ -15,12 +14,21 @@ import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.service.BadgeStore
 
 /**
- * Floating iOS 18 Frosted Glass Dock (up to 4 pinned apps).
- * Designed to sit cleanly above OPPO Android 15 (ColorOS 15) bottom gesture bar.
+ * Floating iOS 18+ Frosted Glass / Frosted Blur / Liquid Glass Dock (up to 4 pinned apps).
+ * Designed to sit cleanly above OPPO Android 15 (ColorOS 15) bottom gesture bar with crisp
+ * Apple-accurate pill silhouette (never muddying the specular rim with edge blur).
  */
 class IosDockView(context: Context) : FrameLayout(context) {
 
-    private val backdropLayer = View(context)
+    private val dockRadiusPx = IosDesign.dp(context, 32f)
+    private val backdropLayer = View(context).apply {
+        outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, dockRadiusPx)
+            }
+        }
+        clipToOutline = true
+    }
     private val iconsRow = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
@@ -58,14 +66,9 @@ class IosDockView(context: Context) : FrameLayout(context) {
             context = context,
             cornerRadiusDp = 32f,
             glassStyle = glassStyle,
-            iconStyle = style
+            iconStyle = style,
+            strongSurface = !blurEnabled && glassStyle == GlassThemeStyle.FROSTED_BLUR
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val radius = IosDesign.blurRadiusFor(glassStyle, strong = false)
-            backdropLayer.setRenderEffect(
-                if (blurEnabled) RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP) else null
-            )
-        }
     }
 
     fun bind(
@@ -88,7 +91,7 @@ class IosDockView(context: Context) : FrameLayout(context) {
                 label = slot.label
                 showLabel = false // iOS Dock icons never show labels
                 largeMode = largeIcons
-                iconBitmap = iconCache.getIcon(slot.packageName, slot.className, slot.label)
+                bindIconAsync(iconCache, slot.packageName, slot.className, slot.label)
                 badgeCount = if (showBadges) BadgeStore.countForPackage(slot.packageName) else 0
                 setJiggling(jiggle)
                 setOnClickListener {

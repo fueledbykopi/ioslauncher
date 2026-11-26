@@ -116,7 +116,7 @@ class SettingsActivity : ComponentActivity() {
         })
         rootColumn.addView(defaultCard)
 
-        // 2. Apple iOS Liquid Glass & Icon Appearance
+        // 2. Apple iOS Glass & Icon Appearance
         rootColumn.addView(createSectionHeader("APPLE IOS GLASS & ICON APPEARANCE"))
         val iconCard = createGroupCard()
         iconCard.addView(createActionRow(
@@ -126,6 +126,7 @@ class SettingsActivity : ComponentActivity() {
         ) {
             showGlassThemePicker()
         })
+        iconCard.addView(buildGlassThemeQuickRow())
         iconCard.addView(createDivider())
         iconCard.addView(createActionRow(
             title = "Icon Style",
@@ -141,7 +142,7 @@ class SettingsActivity : ComponentActivity() {
         iconCard.addView(createDivider())
         iconCard.addView(createSwitchRow(
             title = "Built-in iOS Icon Pack",
-            subtitle = "Custom iOS 18 vector icons for popular apps",
+            subtitle = "iOS vector icons for popular apps (Play Store & Browsers keep own icons in iOS style)",
             checked = prefs.iosIconPackEnabled
         ) { checked ->
             updatePrefs(prefs.copy(iosIconPackEnabled = checked))
@@ -174,9 +175,25 @@ class SettingsActivity : ComponentActivity() {
         })
         rootColumn.addView(iconCard)
 
-        // 3. Home Screen & Gestures
+        // 3. Home Screen & Features
         rootColumn.addView(createSectionHeader("HOME SCREEN & FEATURES"))
         val homeCard = createGroupCard()
+        homeCard.addView(createSwitchRow(
+            title = "Clean Mode",
+            subtitle = "Show only the App Library tab for a minimal, distraction-free look",
+            checked = prefs.cleanModeEnabled
+        ) { checked ->
+            updatePrefs(prefs.copy(cleanModeEnabled = checked))
+        })
+        homeCard.addView(createDivider())
+        homeCard.addView(createSwitchRow(
+            title = "Auto-Arrange Icons",
+            subtitle = "Automatically arrange icons neatly with no empty spaces when apps are uninstalled",
+            checked = prefs.autoArrangeIcons
+        ) { checked ->
+            updatePrefs(prefs.copy(autoArrangeIcons = checked))
+        })
+        homeCard.addView(createDivider())
         homeCard.addView(createSwitchRow("Floating Search Pill", "Show Search pill above Dock", prefs.showSearchPill) {
             updatePrefs(prefs.copy(showSearchPill = it))
         })
@@ -306,6 +323,55 @@ class SettingsActivity : ComponentActivity() {
                 renderSettings()
             }
             .show()
+    }
+
+    private fun buildGlassThemeQuickRow(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val hp = IosDesign.dpInt(this@SettingsActivity, 14f)
+            setPadding(hp, 0, hp, IosDesign.dpInt(this@SettingsActivity, 12f))
+        }
+        val presets = listOf(
+            "Frosted Glass" to GlassThemeStyle.FROSTED_GLASS,
+            "Frosted Blur" to GlassThemeStyle.FROSTED_BLUR,
+            "Liquid Glass" to GlassThemeStyle.LIQUID_GLASS,
+            "Obsidian" to GlassThemeStyle.OBSIDIAN_GLASS
+        )
+        for ((index, pair) in presets.withIndex()) {
+            val (shortLabel, style) = pair
+            val selected = prefs.glassThemeStyle == style
+            val chip = TextView(this).apply {
+                text = shortLabel
+                setTextColor(if (selected) Color.WHITE else 0xFFB0B0B8.toInt())
+                textSize = 11.5f
+                typeface = if (selected) IosDesign.TYPEFACE_MEDIUM_BOLD else IosDesign.TYPEFACE_MEDIUM
+                gravity = Gravity.CENTER
+                maxLines = 1
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = IosDesign.dp(this@SettingsActivity, 10f)
+                    setColor(if (selected) IosDesign.IOS_BLUE else 0xFF2C2C2E.toInt())
+                    if (selected) {
+                        setStroke(IosDesign.dpInt(this@SettingsActivity, 1f), 0x80FFFFFF.toInt())
+                    }
+                }
+                val vp = IosDesign.dpInt(this@SettingsActivity, 8f)
+                val hpChip = IosDesign.dpInt(this@SettingsActivity, 4f)
+                setPadding(hpChip, vp, hpChip, vp)
+                setOnClickListener {
+                    updatePrefs(prefs.copy(glassThemeStyle = style))
+                    renderSettings()
+                }
+            }
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                if (index < presets.lastIndex) {
+                    marginEnd = IosDesign.dpInt(this@SettingsActivity, 6f)
+                }
+            }
+            row.addView(chip, lp)
+        }
+        return row
     }
 
     private fun buildTintSwatchRow(): View {

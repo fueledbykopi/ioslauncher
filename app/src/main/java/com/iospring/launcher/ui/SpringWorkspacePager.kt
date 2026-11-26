@@ -223,7 +223,7 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
                 val absDx = abs(dx)
                 val absDy = abs(dy)
 
-                if (absDx > touchSlop && absDx > absDy * 1.15f) {
+                if (childCount > 1 && absDx > touchSlop && absDx > absDy * 1.15f) {
                     mode = DragMode.HORIZONTAL
                     lastX = x
                     cancelLongPressCheck()
@@ -301,7 +301,7 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
                 }
 
                 if (mode == DragMode.NONE) {
-                    if (abs(dxTotal) > touchSlop && abs(dxTotal) > abs(dyTotal)) {
+                    if (childCount > 1 && abs(dxTotal) > touchSlop && abs(dxTotal) > abs(dyTotal)) {
                         mode = DragMode.HORIZONTAL
                         lastX = x
                     } else if (swipeDownSpotlightEnabled &&
@@ -427,12 +427,27 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
             for (i in 0 until childCount) {
                 val child = getChildAt(i)
                 val dist = abs(currentScrollX - i * w) / w
+                if (dist > 1.25f) {
+                    // Hide far-offscreen pages to cut GPU overdraw & view traversal overhead
+                    if (child.visibility != INVISIBLE) {
+                        child.visibility = INVISIBLE
+                    }
+                    continue
+                }
+                if (child.visibility != VISIBLE) {
+                    child.visibility = VISIBLE
+                }
                 val clamped = dist.coerceIn(0f, 1f)
                 // Subtle iOS SpringBoard depth scale on gliding pages (zero allocations)
                 val scale = 1f - clamped * 0.025f
-                child.scaleX = scale
-                child.scaleY = scale
-                child.alpha = 1f - clamped * 0.14f
+                val targetAlpha = 1f - clamped * 0.14f
+                if (child.scaleX != scale) {
+                    child.scaleX = scale
+                    child.scaleY = scale
+                }
+                if (child.alpha != targetAlpha) {
+                    child.alpha = targetAlpha
+                }
             }
             onScrollProgress?.invoke(currentScrollX, width, childCount)
         }

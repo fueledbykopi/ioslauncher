@@ -2,11 +2,12 @@ package com.iospring.launcher.ui
 
 import android.content.Context
 import android.graphics.Color
-import android.graphics.Typeface
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.iospring.launcher.model.GlassThemeStyle
+import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.widget.IosBatteryWidgetView
 import com.iospring.launcher.widget.IosCalendarWidgetView
 import com.iospring.launcher.widget.IosClockWidgetView
@@ -17,7 +18,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Leftmost iOS 18 Today View (Widget Page).
+ * Leftmost iOS 18+ Today View (Widget Page).
  * Swipe right from Home Page 0 to view glanceable iOS widgets and quick settings.
  */
 class IosTodayViewPage(context: Context) : ScrollView(context) {
@@ -32,11 +33,15 @@ class IosTodayViewPage(context: Context) : ScrollView(context) {
     private val headerDate = TextView(context).apply {
         setTextColor(Color.WHITE)
         textSize = 26f
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
         setShadowLayer(6f, 0f, 2f, 0x88000000.toInt())
     }
 
+    private val headerDateFormat = SimpleDateFormat("EEEE, d MMM", Locale.getDefault())
+    private val headerDateBuf = Date()
     private val refreshables = mutableListOf<RefreshableIosWidget>()
+    private lateinit var editBtn: TextView
+    private lateinit var settingsBtn: TextView
 
     init {
         isVerticalScrollBarEnabled = false
@@ -90,8 +95,8 @@ class IosTodayViewPage(context: Context) : ScrollView(context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        val editBtn = createPillButton("Add Widget") { onAddWidget?.invoke() }
-        val settingsBtn = createPillButton("iOSpring Settings") { onOpenSettings?.invoke() }
+        editBtn = createPillButton("Add Widget") { onAddWidget?.invoke() }
+        settingsBtn = createPillButton("iOSpring Settings") { onOpenSettings?.invoke() }
         btnRow.addView(editBtn, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { marginEnd = IosDesign.dpInt(context, 10f) })
@@ -102,13 +107,19 @@ class IosTodayViewPage(context: Context) : ScrollView(context) {
         refreshWidgets()
     }
 
+    fun applyGlassTheme(glassStyle: GlassThemeStyle, iconStyle: IconThemeStyle) {
+        editBtn.background = IosDesign.createThemeSurface(context, 999f, glassStyle, iconStyle)
+        settingsBtn.background = IosDesign.createThemeSurface(context, 999f, glassStyle, iconStyle)
+    }
+
     fun updateInsets(topInset: Int, bottomInset: Int) {
         val padH = IosDesign.dpInt(context, 18f)
         column.setPadding(padH, topInset + IosDesign.dpInt(context, 18f), padH, bottomInset + IosDesign.dpInt(context, 36f))
     }
 
     fun refreshWidgets() {
-        headerDate.text = SimpleDateFormat("EEEE, d MMM", Locale.getDefault()).format(Date())
+        headerDateBuf.time = System.currentTimeMillis()
+        headerDate.text = headerDateFormat.format(headerDateBuf)
         refreshables.forEach { it.refreshWidgetData() }
     }
 
@@ -117,7 +128,7 @@ class IosTodayViewPage(context: Context) : ScrollView(context) {
             text = title
             setTextColor(Color.WHITE)
             textSize = 14f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            typeface = IosDesign.TYPEFACE_MEDIUM
             background = IosDesign.createPillDrawable(context, 0x3DFFFFFF, 0x3AFFFFFF)
             val hp = IosDesign.dpInt(context, 18f)
             val vp = IosDesign.dpInt(context, 10f)

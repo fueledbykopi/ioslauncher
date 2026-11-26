@@ -3,6 +3,8 @@ package com.iospring.launcher.core
 import android.app.Activity
 import android.app.WallpaperManager
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.os.Build
@@ -17,6 +19,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import java.lang.reflect.Method
 import kotlin.math.abs
 
 /**
@@ -43,6 +46,17 @@ object ColorOsCompat {
     private var lastWallpaperSteps: Int = -1
     private var lastWallpaperProgress: Float = -1f
     private var lastStatusBarSyncMs: Long = 0L
+    private var lastWindowBlurRadius: Int = -1
+
+    private val wallpaperZoomOutMethod: Method? by lazy {
+        runCatching {
+            WallpaperManager::class.java.getMethod(
+                "setWallpaperZoomOut",
+                IBinder::class.java,
+                Float::class.javaPrimitiveType
+            )
+        }.getOrNull()
+    }
 
     fun configureEdgeToEdge(activity: ComponentActivity) {
         activity.enableEdgeToEdge(
@@ -179,18 +193,14 @@ object ColorOsCompat {
 
     /**
      * Applies subtle Android 11+ wallpaper zoom-out when opening Spotlight / Folder / Edit mode.
-     * Invoked via reflection because setWallpaperZoomOut is a @SystemApi on public SDK stubs.
+     * Uses cached reflection method lookup for zero runtime overhead.
      */
     fun setWallpaperZoom(activity: Activity, rootView: View, zoomFraction: Float) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         val token = rootView.windowToken ?: return
+        val method = wallpaperZoomOutMethod ?: return
         try {
             val wm = WallpaperManager.getInstance(activity)
-            val method = WallpaperManager::class.java.getMethod(
-                "setWallpaperZoomOut",
-                IBinder::class.java,
-                Float::class.javaPrimitiveType
-            )
             method.invoke(wm, token, zoomFraction.coerceIn(0f, 1f))
         } catch (_: Exception) {
             // Ignore on devices/ROMs restricting wallpaper zoom
@@ -198,17 +208,49 @@ object ColorOsCompat {
     }
 
     /**
-     * Applies GPU-accelerated RenderEffect blur (Android 12+) to a target view when overlays open.
+     * Applies GPU-accelerated Apple-grade RenderEffect blur (Android 12+) to a target view.
+     * Chains Gaussian blur with Apple's signature vibrancy saturation boost so colors glow
+     * cleanly through the frosted layer instead of washing out to muddy gray.
      */
-    fun applyContentBlur(targetView: View, radiusPx: Float, enabled: Boolean) {
+    fun applyContentBlur(
+        targetView: View,
+        radiusPx: Float,
+        enabled: Boolean,
+        vibrancySaturation: Float = 1.25f
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (enabled && radiusPx > 0.5f) {
-                targetView.setRenderEffect(
-                    RenderEffect.createBlurEffect(radiusPx, radiusPx, Shader.TileMode.CLAMP)
-                )
+                val blur = RenderEffect.createBlurEffect(radiusPx, radiusPx, Shader.TileMode.CLAMP)
+                val effect = if (vibrancySaturation > 1.02f) {
+                    val cm = ColorMatrix().apply { setSaturation(vibrancySaturation) }
+                    RenderEffect.createChainEffect(
+                        blur,
+                        RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(cm))
+                    )
+                } else {
+                    blur
+                }
+                targetView.setRenderEffect(effect)
             } else {
                 targetView.setRenderEffect(null)
             }
+        }
+    }
+
+    /**
+     * Applies native Android 12+ SurfaceFlinger behind-window wallpaper blur when supported
+     * (e.g. Spotlight, expanded Folder, Context Menu, App Library / Clean Mode).
+     * Automatically no-ops cleanly on devices that do not support cross-window blur.
+     */
+    fun setWindowBackgroundBlur(activity: Activity, radiusPx: Int, enabled: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val target = if (enabled && radiusPx > 0) radiusPx.coerceIn(0, 80) else 0
+        if (target == lastWindowBlurRadius) return
+        lastWindowBlurRadius = target
+        try {
+            activity.window.setBackgroundBlurRadius(target)
+        } catch (_: Exception) {
+            // Safe no-op if OEM ROM disables window background blur
         }
     }
 

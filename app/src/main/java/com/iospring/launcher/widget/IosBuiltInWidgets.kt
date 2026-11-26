@@ -81,12 +81,15 @@ class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget
     private var digitalMode: Boolean = false
     private val cardRect = RectF()
     private val cornerRadius = IosDesign.dp(context, 22f)
+    private val calendar = Calendar.getInstance()
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    private val dayFormat = SimpleDateFormat("EEE, d MMM", Locale.getDefault())
 
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val dialPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val tickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
     private val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
         textAlign = Paint.Align.CENTER
     }
     private val handPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
@@ -95,11 +98,11 @@ class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget
         style = Paint.Style.FILL
     }
     private val digitalTimePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif-light", Typeface.BOLD)
+        typeface = IosDesign.TYPEFACE_LIGHT_BOLD
         textAlign = Paint.Align.CENTER
     }
     private val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        typeface = IosDesign.TYPEFACE_MEDIUM
         textAlign = Paint.Align.CENTER
     }
 
@@ -121,9 +124,9 @@ class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val cal = Calendar.getInstance()
-        val hour24 = cal.get(Calendar.HOUR_OF_DAY)
-        val minute = cal.get(Calendar.MINUTE)
+        calendar.timeInMillis = System.currentTimeMillis()
+        val hour24 = calendar.get(Calendar.HOUR_OF_DAY)
+        val minute = calendar.get(Calendar.MINUTE)
         val isNight = hour24 < 6 || hour24 >= 18
 
         cardRect.set(0f, 0f, w, h)
@@ -131,7 +134,7 @@ class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget
         canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, bgPaint)
 
         if (digitalMode) {
-            drawDigital(canvas, w, h, cal, isNight)
+            drawDigital(canvas, w, h, calendar, isNight)
         } else {
             drawAnalog(canvas, w, h, hour24, minute, isNight)
         }
@@ -166,16 +169,15 @@ class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget
             )
         }
 
-        // Cardinal numbers 12, 3, 6, 9
+        // Cardinal numbers 12, 3, 6, 9 (static arrays -> zero per-frame allocations)
         numPaint.color = if (isNight) Color.WHITE else 0xFF1C1C1E.toInt()
         numPaint.textSize = radius * 0.25f
         val numDist = radius * 0.65f
-        val cardinals = listOf("12" to -90.0, "3" to 0.0, "6" to 90.0, "9" to 180.0)
-        for ((txt, deg) in cardinals) {
-            val rad = deg * PI / 180.0
-            val nx = cx + (cos(rad) * numDist).toFloat()
-            val ny = cy + (sin(rad) * numDist).toFloat() - (numPaint.descent() + numPaint.ascent()) / 2f
-            canvas.drawText(txt, nx, ny, numPaint)
+        val textCenterOffset = -(numPaint.descent() + numPaint.ascent()) / 2f
+        for (i in CARDINAL_LABELS.indices) {
+            val nx = cx + CARDINAL_COS[i] * numDist
+            val ny = cy + CARDINAL_SIN[i] * numDist + textCenterOffset
+            canvas.drawText(CARDINAL_LABELS[i], nx, ny, numPaint)
         }
 
         // Hour hand
@@ -204,8 +206,8 @@ class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget
     }
 
     private fun drawDigital(canvas: Canvas, w: Float, h: Float, cal: Calendar, isNight: Boolean) {
-        val timeText = SimpleDateFormat("HH:mm", Locale.getDefault()).format(cal.time)
-        val dayText = SimpleDateFormat("EEE, d MMM", Locale.getDefault()).format(cal.time)
+        val timeText = timeFormat.format(cal.time)
+        val dayText = dayFormat.format(cal.time)
         digitalTimePaint.color = if (isNight) Color.WHITE else 0xFF1C1C1E.toInt()
         digitalTimePaint.textSize = minOf(w, h) * 0.28f
         canvas.drawText(timeText, w / 2f, h * 0.50f, digitalTimePaint)
@@ -217,6 +219,12 @@ class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget
         subPaint.color = if (isNight) 0x88FFFFFF.toInt() else 0x881C1C1E.toInt()
         subPaint.textSize = minOf(w, h) * 0.085f
         canvas.drawText("TAP FOR ANALOG", w / 2f, h * 0.85f, subPaint)
+    }
+
+    companion object {
+        private val CARDINAL_LABELS = arrayOf("12", "3", "6", "9")
+        private val CARDINAL_COS = floatArrayOf(0f, 1f, 0f, -1f)
+        private val CARDINAL_SIN = floatArrayOf(-1f, 0f, 1f, 0f)
     }
 }
 
@@ -241,8 +249,13 @@ class IosCalendarWidgetView(context: Context) : LinearLayout(context), Refreshab
     private val monthView = TextView(context).apply {
         setTextColor(0xFF636366.toInt())
         textSize = 12f
-        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        typeface = IosDesign.TYPEFACE_REGULAR
     }
+
+    private val weekdayFormat = SimpleDateFormat("EEEE", Locale.getDefault())
+    private val dayFormat = SimpleDateFormat("d", Locale.getDefault())
+    private val monthFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+    private val dateBuf = Date()
 
     init {
         orientation = VERTICAL
@@ -269,10 +282,10 @@ class IosCalendarWidgetView(context: Context) : LinearLayout(context), Refreshab
     }
 
     override fun refreshWidgetData() {
-        val now = Date()
-        weekdayView.text = SimpleDateFormat("EEEE", Locale.getDefault()).format(now).uppercase(Locale.getDefault())
-        dayNumberView.text = SimpleDateFormat("d", Locale.getDefault()).format(now)
-        monthView.text = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(now)
+        dateBuf.time = System.currentTimeMillis()
+        weekdayView.text = weekdayFormat.format(dateBuf).uppercase(Locale.getDefault())
+        dayNumberView.text = dayFormat.format(dateBuf)
+        monthView.text = monthFormat.format(dateBuf)
     }
 }
 
@@ -440,8 +453,13 @@ class IosQuickStatusWidgetView(context: Context) : LinearLayout(context), Refres
     private val statsTv = TextView(context).apply {
         setTextColor(0xEEFFFFFF.toInt())
         textSize = 12.5f
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        typeface = IosDesign.TYPEFACE_MEDIUM
     }
+
+    private val dateFormat = SimpleDateFormat("EEEE, d MMMM", Locale.getDefault())
+    private val dateBuf = Date()
+    private val memInfo = ActivityManager.MemoryInfo()
+    private val calendar = Calendar.getInstance()
 
     init {
         orientation = VERTICAL
@@ -465,16 +483,18 @@ class IosQuickStatusWidgetView(context: Context) : LinearLayout(context), Refres
     }
 
     override fun refreshWidgetData() {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val nowMs = System.currentTimeMillis()
+        calendar.timeInMillis = nowMs
+        dateBuf.time = nowMs
+        val hour = calendar.get(Calendar.HOUR_OF_DAY)
         titleTv.text = when {
             hour < 12 -> "Good Morning"
             hour < 17 -> "Good Afternoon"
             else -> "Good Evening"
         }
-        dateTv.text = SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(Date())
+        dateTv.text = dateFormat.format(dateBuf)
 
         val am = context.getSystemService(ActivityManager::class.java)
-        val memInfo = ActivityManager.MemoryInfo()
         am?.getMemoryInfo(memInfo)
         val availGb = memInfo.availMem / (1024f * 1024f * 1024f)
 
