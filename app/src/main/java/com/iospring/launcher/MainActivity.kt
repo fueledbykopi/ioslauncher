@@ -1,7 +1,12 @@
 package com.iospring.launcher
 
+import android.app.Activity
 import android.app.ActivityOptions
 import android.app.AlertDialog
+import android.appwidget.AppWidgetHost
+import android.appwidget.AppWidgetHostView
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProviderInfo
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -30,6 +35,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import com.iospring.launcher.core.BiometricAuthHelper
 import com.iospring.launcher.core.ColorOsCompat
 import com.iospring.launcher.core.GestureSafeInsets
@@ -48,6 +55,7 @@ import com.iospring.launcher.model.LauncherWorkspaceState
 import com.iospring.launcher.service.BadgeStore
 import com.iospring.launcher.service.LauncherKeepAliveService
 import com.iospring.launcher.service.PackageChangeReceiver
+import com.iospring.launcher.service.ScreenLockAccessibilityService
 import com.iospring.launcher.ui.IosAppIconView
 import com.iospring.launcher.ui.IosAppLibraryPage
 import com.iospring.launcher.ui.IosContextMenuOverlay
@@ -58,8 +66,10 @@ import com.iospring.launcher.ui.IosHomeGridPage
 import com.iospring.launcher.ui.IosSearchPillView
 import com.iospring.launcher.ui.IosSpotlightOverlayView
 import com.iospring.launcher.ui.IosTodayViewPage
+import com.iospring.launcher.ui.IosWidgetContainerView
 import com.iospring.launcher.ui.SettingsActivity
 import com.iospring.launcher.ui.SpringWorkspacePager
+import com.iospring.launcher.widget.AndroidWidgetHelper
 import com.iospring.launcher.widget.IosBuiltInWidgetFactory
 import com.iospring.launcher.widget.RefreshableIosWidget
 import kotlinx.coroutines.CoroutineScope
@@ -82,6 +92,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var repository: LauncherRepository
     private lateinit var iconCache: IconCacheManager
     private var launcherApps: LauncherApps? = null
+    private lateinit var appWidgetManager: AppWidgetManager
+    private lateinit var appWidgetHost: AppWidgetHost
+    private val widgetHostViewCache = HashMap<Int, AppWidgetHostView>()
+    private var pendingBindWidgetId: Int = AppWidgetManager.INVALID_APPWIDGET_ID
+    private var pendingBindWidgetInfo: AppWidgetProviderInfo? = null
+    private lateinit var bindWidgetLauncher: ActivityResultLauncher<Intent>
+    private lateinit var configureWidgetLauncher: ActivityResultLauncher<Intent>
 
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -155,7 +172,35 @@ class MainActivity : ComponentActivity() {
         repository = LauncherRepository(applicationContext)
         iconCache = IconCacheManager(applicationContext)
         launcherApps = getSystemService(LauncherApps::class.java)
+        appWidgetManager = AppWidgetManager.getInstance(applicationContext)
+        appWidgetHost = AppWidgetHost(this, AndroidWidgetHelper.APPWIDGET_HOST_ID)
         dragTouchSlop = ViewConfiguration.get(this).scaledTouchSlop
+
+        bindWidgetLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val widgetId = pendingBindWidgetId
+            val info = pendingBindWidgetInfo
+            if (result.resultCode == Activity.RESULT_OK && widgetId != AppWidgetManager.INVALID_APPWIDGET_ID && info != null) {
+                completeAndroidWidgetAfterBind(widgetId, info)
+            } else {
+                if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+                    runCatching { appWidgetHost.deleteAppWidgetId(widgetId) }
+                }
+                pendingBindWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+                pendingBindWidgetInfo = null
+            }
+        }
+
+        configureWidgetLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val widgetId = pendingBindWidgetId
+            val info = pendingBindWidgetInfo
+            pendingBindWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+            pendingBindWidgetInfo = null
+            if (result.resultCode == Activity.RESULT_OK && widgetId != AppWidgetManager.INVALID_APPWIDGET_ID && info != null) {
+                finalizeAddAndroidWidget(widgetId, info)
+            } else if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+                runCatching { appWidgetHost.deleteAppWidgetId(widgetId) }
+            }
+        }
 
         prefs = repository.loadPreferences()
         iconCache.updateTheme(prefs.iconThemeStyle, prefs.iconTintColor, prefs.iosIconPackEnabled, prefs.glassThemeStyle)
@@ -199,6 +244,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        runCatching { appWidgetHost.startListening() }
         registerLiveTickReceiver()
     }
 
@@ -274,7 +320,7 @@ class MainActivity : ComponentActivity() {
             pendingResumeHousekeeping = null
             if (!isActivityResumed) return@Runnable
             ColorOsCompat.syncStatusBarAppearanceWithWallpaper(this@MainActivity)
-            LauncherKeepAliveService.syncState(this@MainActivity, prefs.keepInRamEnabled)
+            LauncherKeepAliveService.syncState(this@MainActivity, prefs.keepInRamEnabled, prefs.iosLockScreenEnabled)
             refreshVisibleWidgets()
             refreshBadgesInPlace()
         }
@@ -301,6 +347,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         wasStoppedInBackground = true
+        runCatching { appWidgetHost.stopListening() }
         unregisterLiveTickReceiver()
         super.onStop()
     }
@@ -309,6 +356,7 @@ class MainActivity : ComponentActivity() {
         BadgeStore.removeListener(badgeListener)
         packageReceiver?.unregister(this)
         unregisterLiveTickReceiver()
+        widgetHostViewCache.clear()
         mainScope.cancel()
         iconCache.close()
         repository.close()
@@ -374,6 +422,11 @@ class MainActivity : ComponentActivity() {
             onEmptyTap = {
                 if (isJiggleMode) {
                     exitJiggleMode()
+                }
+            }
+            onEmptyDoubleTap = {
+                if (!isJiggleMode && prefs.doubleTapToLockEnabled) {
+                    handleDoubleTapScreenOff()
                 }
             }
         }
@@ -930,34 +983,97 @@ class MainActivity : ComponentActivity() {
                     attachJiggleDragTouchListener(this, item)
                 }
 
-                is HomeItem.BuiltInWidgetItem -> IosBuiltInWidgetFactory.createView(
-                    context = this,
-                    item = item,
-                    onEditNote = { noteItem -> promptEditQuickNote(noteItem) },
-                    onOpenCalendar = { launchCategoryApp(listOf("calendar")) },
-                    onOpenClock = { launchCategoryApp(listOf("deskclock", "clock", "alarm")) }
-                ).apply {
-                    setOnLongClickListener {
-                        IosDesign.hapticLongPress(this, prefs.hapticsEnabled)
-                        if (isJiggleMode) {
-                            promptRemoveHomeItem(item)
-                        } else {
+                is HomeItem.BuiltInWidgetItem -> {
+                    val content = IosBuiltInWidgetFactory.createContentView(
+                        context = this,
+                        item = item,
+                        glassStyle = prefs.glassThemeStyle,
+                        iconStyle = prefs.iconThemeStyle,
+                        onEditNote = { noteItem -> promptEditQuickNote(noteItem) },
+                        onOpenCalendar = { launchCategoryApp(listOf("calendar")) }
+                    )
+                    IosWidgetContainerView(this, content).apply {
+                        setJiggling(isJiggleMode)
+                        onWidgetLongPress = {
+                            IosDesign.hapticLongPress(this, prefs.hapticsEnabled)
                             showWidgetContextMenu(item)
                         }
-                        true
+                        onRemoveClick = {
+                            promptRemoveHomeItem(item)
+                        }
+                        onJiggleTouch = { v, ev -> handleJiggleDragTouch(v, item, ev) }
                     }
-                    attachJiggleDragTouchListener(this, item)
                 }
 
-                is HomeItem.AndroidWidgetItem -> TextView(this).apply {
-                    text = "Widget"
-                    setTextColor(Color.WHITE)
-                    gravity = Gravity.CENTER
-                    background = IosDesign.createGlassDrawable(this@MainActivity, 22f)
+                is HomeItem.AndroidWidgetItem -> {
+                    val content = createOrReuseAndroidWidgetView(item)
+                    IosWidgetContainerView(this, content).apply {
+                        setJiggling(isJiggleMode)
+                        onWidgetLongPress = {
+                            IosDesign.hapticLongPress(this, prefs.hapticsEnabled)
+                            showWidgetContextMenu(item)
+                        }
+                        onRemoveClick = {
+                            promptRemoveHomeItem(item)
+                        }
+                        onJiggleTouch = { v, ev -> handleJiggleDragTouch(v, item, ev) }
+                    }
                 }
             }
             gridPage.addHomeItemView(view, item)
         }
+    }
+
+    private fun createOrReuseAndroidWidgetView(item: HomeItem.AndroidWidgetItem): View {
+        val info = runCatching { appWidgetManager.getAppWidgetInfo(item.appWidgetId) }.getOrNull()
+        if (info == null) {
+            return TextView(this).apply {
+                text = "Widget unavailable\n(Long-press to remove)"
+                setTextColor(0xCCFFFFFF.toInt())
+                textSize = 12.5f
+                gravity = Gravity.CENTER
+                background = IosDesign.createThemeSurface(
+                    this@MainActivity, 22f, prefs.glassThemeStyle, IconThemeStyle.DARK, strongSurface = true
+                )
+            }
+        }
+        val cached = widgetHostViewCache[item.appWidgetId]
+        if (cached != null) {
+            (cached.parent as? ViewGroup)?.removeView(cached)
+            return cached
+        }
+        return try {
+            val hostView = appWidgetHost.createView(applicationContext, item.appWidgetId, info)
+            hostView.setAppWidget(item.appWidgetId, info)
+            widgetHostViewCache[item.appWidgetId] = hostView
+            hostView
+        } catch (_: Exception) {
+            TextView(this).apply {
+                text = info.loadLabel(packageManager) ?: "Android Widget"
+                setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER
+                background = IosDesign.createThemeSurface(
+                    this@MainActivity, 22f, prefs.glassThemeStyle, IconThemeStyle.DARK, strongSurface = true
+                )
+            }
+        }
+    }
+
+    private fun deleteAndroidWidgetHostId(appWidgetId: Int) {
+        widgetHostViewCache.remove(appWidgetId)
+        if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            runCatching { appWidgetHost.deleteAppWidgetId(appWidgetId) }
+        }
+    }
+
+    private fun removeHomeItemAndCleanup(item: HomeItem) {
+        if (item is HomeItem.AndroidWidgetItem) {
+            deleteAndroidWidgetHostId(item.appWidgetId)
+        }
+        workspace.items.removeAll { it.id == item.id }
+        compactIfAutoArrange()
+        repository.saveWorkspaceAsync(workspace)
+        rebuildWorkspacePages(preserveCurrentPage = true)
     }
 
     private fun bindDock() {
@@ -974,6 +1090,7 @@ class MainActivity : ComponentActivity() {
     private fun applyGlassThemeToChrome() {
         dockView.applyGlassStyle(prefs.iconThemeStyle, prefs.blurEnabled, prefs.glassThemeStyle)
         searchPill.glassThemeStyle = prefs.glassThemeStyle
+        searchPill.iconThemeStyle = prefs.iconThemeStyle
         editPillBtn.background = IosDesign.createThemeSurface(this, 999f, prefs.glassThemeStyle, prefs.iconThemeStyle)
         donePillBtn.background = IosDesign.createThemeSurface(this, 999f, prefs.glassThemeStyle, prefs.iconThemeStyle)
         todayViewPage?.applyGlassTheme(prefs.glassThemeStyle, prefs.iconThemeStyle)
@@ -1011,38 +1128,41 @@ class MainActivity : ComponentActivity() {
 
     private fun attachJiggleDragTouchListener(view: View, item: HomeItem) {
         view.setOnTouchListener { v, event ->
-            if (!isJiggleMode) return@setOnTouchListener false
+            handleJiggleDragTouch(v, item, event)
+        }
+    }
 
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    dragStartX = event.rawX
-                    dragStartY = event.rawY
-                    dragMoved = false
-                    false // Allow (-) remove badge tap to still work if not dragged
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX - dragStartX
-                    val dy = event.rawY - dragStartY
-                    if (!dragMoved && (abs(dx) > dragTouchSlop || abs(dy) > dragTouchSlop)) {
-                        dragMoved = true
-                        startDraggingItem(v, item, event.rawX, event.rawY)
-                    }
-                    if (dragMoved && dragItem == item) {
-                        updateDraggingItem(event.rawX, event.rawY)
-                        return@setOnTouchListener true
-                    }
-                    false
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (dragMoved && dragItem == item) {
-                        finishDraggingItem(event.rawX, event.rawY)
-                        dragMoved = false
-                        return@setOnTouchListener true
-                    }
-                    false
-                }
-                else -> false
+    private fun handleJiggleDragTouch(v: View, item: HomeItem, event: MotionEvent): Boolean {
+        if (!isJiggleMode) return false
+        return when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                dragStartX = event.rawX
+                dragStartY = event.rawY
+                dragMoved = false
+                false // Allow (-) remove badge tap to still work if not dragged
             }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.rawX - dragStartX
+                val dy = event.rawY - dragStartY
+                if (!dragMoved && (abs(dx) > dragTouchSlop || abs(dy) > dragTouchSlop)) {
+                    dragMoved = true
+                    startDraggingItem(v, item, event.rawX, event.rawY)
+                }
+                if (dragMoved && dragItem == item) {
+                    updateDraggingItem(event.rawX, event.rawY)
+                    return true
+                }
+                false
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (dragMoved && dragItem == item) {
+                    finishDraggingItem(event.rawX, event.rawY)
+                    dragMoved = false
+                    return true
+                }
+                false
+            }
+            else -> false
         }
     }
 
@@ -1450,25 +1570,78 @@ class MainActivity : ComponentActivity() {
         contextMenuOverlay.show(label, actions)
     }
 
-    private fun showWidgetContextMenu(item: HomeItem.BuiltInWidgetItem) {
-        val actions = mutableListOf(
-            IosContextMenuOverlay.MenuAction("Edit Home Screen", "⊞") { enterJiggleMode() },
-            IosContextMenuOverlay.MenuAction("Add Another Widget", "+") { showAddWidgetDialog() },
-            IosContextMenuOverlay.MenuAction("Remove Widget", "−", isDestructive = true) {
-                workspace.items.removeAll { it.id == item.id }
-                compactIfAutoArrange()
-                repository.saveWorkspaceAsync(workspace)
-                rebuildWorkspacePages(preserveCurrentPage = true)
+    private fun showWidgetContextMenu(item: HomeItem) {
+        val header = when (item) {
+            is HomeItem.BuiltInWidgetItem -> item.widgetType.title
+            is HomeItem.AndroidWidgetItem -> {
+                runCatching {
+                    appWidgetManager.getAppWidgetInfo(item.appWidgetId)?.loadLabel(packageManager)
+                }.getOrNull() ?: "Android Widget"
             }
-        )
+            else -> "Widget"
+        }
+        val actions = mutableListOf<IosContextMenuOverlay.MenuAction>()
+        if (item is HomeItem.BuiltInWidgetItem && item.widgetType == BuiltInWidgetType.CLOCK_2X2) {
+            actions.add(IosContextMenuOverlay.MenuAction("Open Clock App", "🕒") {
+                launchCategoryApp(listOf("deskclock", "clock", "alarm"))
+            })
+        }
+        if (item is HomeItem.AndroidWidgetItem) {
+            actions.add(IosContextMenuOverlay.MenuAction("Resize Widget", "⤢") {
+                showResizeAndroidWidgetDialog(item)
+            })
+        }
+        actions.add(IosContextMenuOverlay.MenuAction("Edit Home Screen", "⊞") { enterJiggleMode() })
+        actions.add(IosContextMenuOverlay.MenuAction("Add Another Widget", "+") { showAddWidgetDialog() })
+        actions.add(IosContextMenuOverlay.MenuAction("Remove Widget", "−", isDestructive = true) {
+            removeHomeItemAndCleanup(item)
+        })
         setOverlayBlur(true)
-        contextMenuOverlay.show(item.widgetType.title, actions)
+        contextMenuOverlay.show(header, actions)
+    }
+
+    private fun showResizeAndroidWidgetDialog(item: HomeItem.AndroidWidgetItem) {
+        val presets = listOf(
+            Pair(2, 2),
+            Pair(4, 1),
+            Pair(4, 2),
+            Pair(4, 3),
+            Pair(4, 4)
+        ).filter { it.first <= prefs.gridCols && it.second <= prefs.gridRows }
+        val labels = presets.map { "${it.first} × ${it.second}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Resize Widget")
+            .setItems(labels) { _, which ->
+                val (newSpanX, newSpanY) = presets[which]
+                val occ = GridOccupancy.forPage(item.page, prefs.gridCols, prefs.gridRows, workspace.items)
+                val targetCol = item.col.coerceIn(0, (prefs.gridCols - newSpanX).coerceAtLeast(0))
+                val targetRow = item.row.coerceIn(0, (prefs.gridRows - newSpanY).coerceAtLeast(0))
+                val updated = item.copy(col = targetCol, row = targetRow, spanX = newSpanX, spanY = newSpanY)
+                val idx = workspace.items.indexOfFirst { it.id == item.id }
+                if (idx >= 0) {
+                    if (occ.canPlace(targetCol, targetRow, newSpanX, newSpanY, ignoreItemId = item.id)) {
+                        workspace.items[idx] = updated
+                    } else {
+                        val vacant = occ.findFirstVacant(newSpanX, newSpanY)
+                        if (vacant != null) {
+                            workspace.items[idx] = updated.copy(col = vacant.first, row = vacant.second)
+                        } else {
+                            workspace.items[idx] = updated.copy(page = workspace.pagesCount, col = 0, row = 0)
+                            workspace.pagesCount += 1
+                        }
+                    }
+                    compactIfAutoArrange()
+                    repository.saveWorkspaceAsync(workspace)
+                    rebuildWorkspacePages(preserveCurrentPage = true)
+                }
+            }
+            .show()
     }
 
     private fun showEditMenuDialog() {
         val items = arrayOf(
-            "Add Built-in iOS Widget",
-            "Customize Icons (Light / Dark / Tinted / Large)",
+            "Add Widget (iOS & Android)",
+            "Customize Icons (Dark / Light / Tinted / Large)",
             "Open iOSpring Settings"
         )
         AlertDialog.Builder(this)
@@ -1484,6 +1657,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showAddWidgetDialog() {
+        val categories = arrayOf(
+            "Built-in iOS Widgets (Clock, Calendar, Batteries, Notes)",
+            "Android System Widgets (Installed Apps)"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Add Widget")
+            .setItems(categories) { _, which ->
+                when (which) {
+                    0 -> showBuiltInWidgetPicker()
+                    1 -> showAndroidWidgetPicker()
+                }
+            }
+            .show()
+    }
+
+    private fun showBuiltInWidgetPicker() {
         val types = BuiltInWidgetType.entries
         val labels = types.map { "${it.title} (${it.defaultSpanX}×${it.defaultSpanY}) — ${it.subtitle}" }.toTypedArray()
         AlertDialog.Builder(this)
@@ -1491,6 +1680,134 @@ class MainActivity : ComponentActivity() {
             .setItems(labels) { _, which ->
                 addBuiltInWidgetToWorkspace(types[which])
             }
+            .show()
+    }
+
+    private fun showAndroidWidgetPicker() {
+        mainScope.launch {
+            val entries = withContext(Dispatchers.IO) {
+                AndroidWidgetHelper.loadAvailableAndroidWidgets(
+                    this@MainActivity,
+                    prefs.gridCols,
+                    prefs.gridRows
+                )
+            }
+            if (!isActivityResumed) return@launch
+            if (entries.isEmpty()) {
+                Toast.makeText(this@MainActivity, "No Android widgets available", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val labels = entries.map { "${it.appLabel} — ${it.widgetLabel} (${it.spanX}×${it.spanY})" }.toTypedArray()
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("Android Widgets")
+                .setItems(labels) { _, which ->
+                    beginBindAndroidWidget(entries[which].providerInfo)
+                }
+                .show()
+        }
+    }
+
+    private fun beginBindAndroidWidget(info: AppWidgetProviderInfo) {
+        val appWidgetId = try {
+            appWidgetHost.allocateAppWidgetId()
+        } catch (_: Exception) {
+            Toast.makeText(this, "Unable to allocate widget slot", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val bound = try {
+            appWidgetManager.bindAppWidgetIdIfAllowed(appWidgetId, info.profile, info.provider, null)
+        } catch (_: Exception) {
+            false
+        }
+        if (bound) {
+            completeAndroidWidgetAfterBind(appWidgetId, info)
+        } else {
+            pendingBindWidgetId = appWidgetId
+            pendingBindWidgetInfo = info
+            val bindIntent = Intent(AppWidgetManager.ACTION_APPWIDGET_BIND).apply {
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.provider)
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER_PROFILE, info.profile)
+            }
+            try {
+                bindWidgetLauncher.launch(bindIntent)
+            } catch (_: Exception) {
+                runCatching { appWidgetHost.deleteAppWidgetId(appWidgetId) }
+                pendingBindWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+                pendingBindWidgetInfo = null
+                Toast.makeText(this, "Widget permission denied by system", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun completeAndroidWidgetAfterBind(appWidgetId: Int, info: AppWidgetProviderInfo) {
+        val configComponent = info.configure
+        if (configComponent != null) {
+            pendingBindWidgetId = appWidgetId
+            pendingBindWidgetInfo = info
+            val cfgIntent = Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE).apply {
+                component = configComponent
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            }
+            try {
+                configureWidgetLauncher.launch(cfgIntent)
+                return
+            } catch (_: Exception) {
+                // Fall back to direct placement if provider's config activity isn't exported
+                pendingBindWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+                pendingBindWidgetInfo = null
+            }
+        }
+        finalizeAddAndroidWidget(appWidgetId, info)
+    }
+
+    private fun finalizeAddAndroidWidget(appWidgetId: Int, info: AppWidgetProviderInfo) {
+        val (spanX, spanY) = AndroidWidgetHelper.computeGridSpan(this, info, prefs.gridCols, prefs.gridRows)
+        val startPage = (pager.activePageIndex - currentHomePageOffset).coerceAtLeast(0)
+        var targetPage = startPage
+        var placement: Pair<Int, Int>? = null
+
+        for (p in startPage until (workspace.pagesCount + 1)) {
+            val occ = GridOccupancy.forPage(p, prefs.gridCols, prefs.gridRows, workspace.items)
+            val slot = occ.findFirstVacant(spanX, spanY)
+            if (slot != null) {
+                targetPage = p
+                placement = slot
+                break
+            }
+        }
+        val (col, row) = placement ?: Pair(0, 0)
+        workspace.items.add(
+            HomeItem.AndroidWidgetItem(
+                id = LauncherRepository.newId(),
+                page = targetPage,
+                col = col,
+                row = row,
+                spanX = spanX,
+                spanY = spanY,
+                appWidgetId = appWidgetId,
+                providerPackage = info.provider.packageName,
+                providerClass = info.provider.className
+            )
+        )
+        workspace.pagesCount = maxOf(workspace.pagesCount, targetPage + 1)
+        repository.saveWorkspaceAsync(workspace)
+        rebuildWorkspacePages(preserveCurrentPage = false)
+        pager.scrollToPage(currentHomePageOffset + targetPage, animate = true)
+    }
+
+    private fun handleDoubleTapScreenOff() {
+        if (ScreenLockAccessibilityService.lockScreenNow()) {
+            IosDesign.hapticTick(rootFrame, prefs.hapticsEnabled)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Enable Double-Tap Screen Off")
+            .setMessage("Turn on \"iOSpring Double-Tap Screen Off\" in Android Accessibility Settings to lock the screen instantly without disabling Fingerprint/Face Unlock.")
+            .setPositiveButton("Open Settings") { _, _ ->
+                runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -1529,9 +1846,9 @@ class MainActivity : ComponentActivity() {
     private fun showQuickIconCustomizeDialog() {
         val options = arrayOf(
             "Glass Theme: ${prefs.glassThemeStyle.label} (Tap to Switch)",
-            "Light Icons (Default)",
-            "Dark Mode Icons (iOS 18)",
-            "Tinted Icons (iOS 18 Blue)",
+            "Light Icons",
+            "Dark Mode Icons (Default)",
+            "Tinted Icons (iOS Blue)",
             if (prefs.iosIconPackEnabled) "Built-in iOS Icon Pack: ON (Tap to Disable)" else "Built-in iOS Icon Pack: OFF (Tap to Enable)",
             if (prefs.showAppLabels) "App Labels Below Icons: ON (Tap to Hide)" else "App Labels Below Icons: OFF (Tap to Show)",
             "Toggle Large Icons"
@@ -1578,20 +1895,27 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun promptRemoveHomeItem(item: HomeItem) {
+        val isWidget = item is HomeItem.BuiltInWidgetItem || item is HomeItem.AndroidWidgetItem
         val label = when (item) {
             is HomeItem.AppShortcut -> item.label
             is HomeItem.FolderItem -> item.title
             is HomeItem.BuiltInWidgetItem -> item.widgetType.title
-            is HomeItem.AndroidWidgetItem -> "Widget"
+            is HomeItem.AndroidWidgetItem -> {
+                runCatching {
+                    appWidgetManager.getAppWidgetInfo(item.appWidgetId)?.loadLabel(packageManager)
+                }.getOrNull() ?: "Widget"
+            }
+        }
+        val message = if (isWidget) {
+            "Remove this widget from your Home Screen?"
+        } else {
+            "Removing from the Home Screen keeps the app inside your App Library."
         }
         AlertDialog.Builder(this)
             .setTitle("Remove \"$label\"?")
-            .setMessage("Removing from the Home Screen keeps the app inside your App Library.")
+            .setMessage(message)
             .setPositiveButton("Remove") { _, _ ->
-                workspace.items.removeAll { it.id == item.id }
-                compactIfAutoArrange()
-                repository.saveWorkspaceAsync(workspace)
-                rebuildWorkspacePages(preserveCurrentPage = true)
+                removeHomeItemAndCleanup(item)
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -1777,8 +2101,8 @@ class MainActivity : ComponentActivity() {
         todayViewPage?.refreshWidgets()
         for (page in homeGridPages) {
             for (i in 0 until page.childCount) {
-                val wrapper = page.getChildAt(i) as? FrameLayout ?: continue
-                val inner = wrapper.getChildAt(0)
+                val container = page.getChildAt(i) as? IosWidgetContainerView ?: continue
+                val inner = container.contentView
                 if (inner is RefreshableIosWidget) {
                     inner.refreshWidgetData()
                 }

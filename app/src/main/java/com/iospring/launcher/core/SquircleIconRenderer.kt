@@ -100,7 +100,7 @@ class IconCacheManager(private val context: Context) {
     private val maskPath: Path = SquircleMath.getCachedSquareSquircle(iconSizePx, exponent = 4.8f)
 
     @Volatile
-    private var themeStyle: IconThemeStyle = IconThemeStyle.LIGHT
+    private var themeStyle: IconThemeStyle = IconThemeStyle.DARK
     @Volatile
     private var glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
     @Volatile
@@ -260,27 +260,28 @@ class IconCacheManager(private val context: Context) {
         val isLight = themeStyle == IconThemeStyle.LIGHT
         when (glassStyle) {
             GlassThemeStyle.LIQUID_GLASS -> {
-                // Apple iOS 26 Liquid Glass: curved optical top sheen + bright directional specular rim
+                // Apple iOS 26 Liquid Glass: curved diagonal optical meniscus + dual-corner specular rim
                 val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     shader = LinearGradient(
-                        0f, 0f, 0f, s * 0.44f,
-                        if (isLight) 0x3AFFFFFF else 0x26FFFFFF,
+                        0f, 0f, s * 0.45f, s * 0.48f,
+                        if (isLight) 0x3EFFFFFF else 0x2EFFFFFF,
                         0x00FFFFFF,
                         Shader.TileMode.CLAMP
                     )
                 }
-                canvas.drawRect(0f, 0f, s, s * 0.44f, sheenPaint)
+                canvas.drawRect(0f, 0f, s, s * 0.48f, sheenPaint)
                 val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     style = Paint.Style.STROKE
-                    strokeWidth = (1.5f * density).coerceAtLeast(1.5f)
+                    strokeWidth = (1.6f * density).coerceAtLeast(1.6f)
                     shader = LinearGradient(
-                        0f, 0f, s * 0.3f, s,
+                        0f, 0f, s, s,
                         intArrayOf(
-                            if (isLight) 0x9EFFFFFF.toInt() else 0x6EFFFFFF,
-                            0x24FFFFFF,
-                            if (isLight) 0x5AFFFFFF else 0x38FFFFFF
+                            if (isLight) 0xB4FFFFFF.toInt() else 0x84FFFFFF.toInt(),
+                            0x1AFFFFFF,
+                            0x1AFFFFFF,
+                            if (isLight) 0x6AFFFFFF else 0x4CFFFFFF
                         ),
-                        floatArrayOf(0f, 0.5f, 1f),
+                        floatArrayOf(0f, 0.36f, 0.68f, 1f),
                         Shader.TileMode.CLAMP
                     )
                 }

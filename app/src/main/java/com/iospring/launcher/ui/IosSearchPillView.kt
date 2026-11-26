@@ -3,10 +3,13 @@ package com.iospring.launcher.ui
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.view.View
 import com.iospring.launcher.model.GlassThemeStyle
+import com.iospring.launcher.model.IconThemeStyle
 
 /**
  * Signature iOS 16-26 floating "Search" frosted capsule above the Dock.
@@ -51,38 +54,81 @@ class IosSearchPillView(context: Context) : View(context) {
             }
         }
 
+    var iconThemeStyle: IconThemeStyle = IconThemeStyle.DARK
+        set(value) {
+            if (field != value) {
+                field = value
+                applyThemeColors()
+                invalidate()
+            }
+        }
+
     private fun applyThemeColors() {
+        val darkBias = iconThemeStyle != IconThemeStyle.LIGHT
         when (glassThemeStyle) {
             GlassThemeStyle.LIQUID_GLASS -> {
-                bgPaint.color = 0x34FFFFFF
-                topHighlightPaint.color = 0x34FFFFFF
-                strokePaint.color = 0x9EFFFFFF.toInt()
-                strokePaint.strokeWidth = IosDesign.dp(context, 1.05f)
+                bgPaint.color = if (darkBias) 0x58181A22 else 0x34FFFFFF
+                topHighlightPaint.color = if (darkBias) 0x24FFFFFF else 0x38FFFFFF
+                strokePaint.color = if (darkBias) 0x82FFFFFF.toInt() else 0xA8FFFFFF.toInt()
+                strokePaint.strokeWidth = IosDesign.dp(context, 1.15f)
             }
             GlassThemeStyle.FROSTED_GLASS -> {
-                bgPaint.color = 0x5AF6F7FC
-                topHighlightPaint.color = 0x30FFFFFF
-                strokePaint.color = 0x80FFFFFF.toInt()
+                bgPaint.color = if (darkBias) 0x721E1F26 else 0x5AF6F7FC
+                topHighlightPaint.color = if (darkBias) 0x1EFFFFFF else 0x30FFFFFF
+                strokePaint.color = if (darkBias) 0x5AFFFFFF else 0x80FFFFFF.toInt()
                 strokePaint.strokeWidth = IosDesign.dp(context, 0.9f)
             }
             GlassThemeStyle.FROSTED_BLUR -> {
-                bgPaint.color = 0x6EF2F3F8
-                topHighlightPaint.color = 0x18FFFFFF
-                strokePaint.color = 0x48FFFFFF
+                bgPaint.color = if (darkBias) 0x821B1C22.toInt() else 0x6EF2F3F8
+                topHighlightPaint.color = 0x14FFFFFF
+                strokePaint.color = if (darkBias) 0x34FFFFFF else 0x48FFFFFF
                 strokePaint.strokeWidth = IosDesign.dp(context, 0.7f)
             }
             GlassThemeStyle.OBSIDIAN_GLASS -> {
-                bgPaint.color = 0x7A18181C
+                bgPaint.color = 0x86141418.toInt()
                 topHighlightPaint.color = 0x18FFFFFF
                 strokePaint.color = 0x48FFFFFF
                 strokePaint.strokeWidth = IosDesign.dp(context, 0.95f)
             }
         }
+        strokePaint.shader = null
     }
 
     private var showingDots: Boolean = false
     private val pillRect = RectF()
     private val highlightRect = RectF()
+    private var lastShaderL = -1f
+    private var lastShaderT = -1f
+    private var lastShaderR = -1f
+    private var lastShaderB = -1f
+
+    private fun ensureLiquidStrokeShader() {
+        if (glassThemeStyle != GlassThemeStyle.LIQUID_GLASS) {
+            strokePaint.shader = null
+            return
+        }
+        if (strokePaint.shader != null &&
+            lastShaderL == pillRect.left && lastShaderT == pillRect.top &&
+            lastShaderR == pillRect.right && lastShaderB == pillRect.bottom
+        ) {
+            return
+        }
+        lastShaderL = pillRect.left
+        lastShaderT = pillRect.top
+        lastShaderR = pillRect.right
+        lastShaderB = pillRect.bottom
+        val darkBias = iconThemeStyle != IconThemeStyle.LIGHT
+        strokePaint.shader = LinearGradient(
+            pillRect.left, pillRect.top, pillRect.right, pillRect.bottom,
+            intArrayOf(
+                if (darkBias) 0x8CFFFFFF.toInt() else 0xB8FFFFFF.toInt(),
+                0x20FFFFFF,
+                if (darkBias) 0x58FFFFFF else 0x82FFFFFF.toInt()
+            ),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP
+        )
+    }
 
     private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x4AFFFFFF
@@ -194,6 +240,7 @@ class IosSearchPillView(context: Context) : View(context) {
             val left = (w - pillW) / 2f
 
             pillRect.set(left, top, left + pillW, top + pillH)
+            ensureLiquidStrokeShader()
             canvas.drawRoundRect(pillRect, r, r, bgPaint)
             highlightRect.set(
                 pillRect.left + IosDesign.dp(context, 1f),
@@ -229,6 +276,7 @@ class IosSearchPillView(context: Context) : View(context) {
             val left = (w - pillW) / 2f
 
             pillRect.set(left, top, left + pillW, top + pillH)
+            ensureLiquidStrokeShader()
             canvas.drawRoundRect(pillRect, r, r, bgPaint)
             canvas.drawRoundRect(pillRect, r, r, strokePaint)
 

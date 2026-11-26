@@ -58,6 +58,17 @@
             android:label="@string/settings_title"
             android:theme="@style/Theme.IOSpring.Settings" />
 
+        <activity
+            android:name=".ui.IosLockScreenActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|density"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:screenOrientation="nosensor"
+            android:showWhenLocked="true"
+            android:taskAffinity="com.iospring.launcher.lockscreen"
+            android:theme="@style/Theme.IOSpring.LockScreen" />
+
         <service
             android:name=".service.LauncherKeepAliveService"
             android:exported="false"
@@ -65,6 +76,19 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keep home screen launcher resident in memory for instant Home gesture response" />
+        </service>
+
+        <service
+            android:name=".service.ScreenLockAccessibilityService"
+            android:exported="false"
+            android:label="@string/screen_lock_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/screen_lock_accessibility_config" />
         </service>
 
         <service

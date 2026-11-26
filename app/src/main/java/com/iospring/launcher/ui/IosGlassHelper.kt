@@ -121,30 +121,32 @@ object IosDesign {
 
         return when (glassStyle) {
             GlassThemeStyle.LIQUID_GLASS -> {
-                val strokePx = dp(context, 1.15f)
+                val strokePx = dp(context, 1.25f)
                 if (strongSurface) {
                     IosLiquidGlassDrawable(
                         cornerRadiusPx = radiusPx,
                         strokeWidthPx = strokePx,
-                        topFill = if (darkBias) 0x8224242A.toInt() else 0x52FFFFFF,
-                        midFill = if (darkBias) 0x6A16161C.toInt() else 0x2EEAF0FA,
-                        bottomFill = if (darkBias) 0x7A1C1C22.toInt() else 0x42DCE4F4,
-                        topSpecSheen = if (darkBias) 0x30FFFFFF else 0x56FFFFFF,
-                        rimTop = if (darkBias) 0x78FFFFFF else 0xB8FFFFFF.toInt(),
-                        rimMid = if (darkBias) 0x26FFFFFF else 0x40FFFFFF,
-                        rimBottom = if (darkBias) 0x52FFFFFF else 0x84FFFFFF.toInt()
+                        topFill = if (darkBias) 0x9220222A.toInt() else 0x56FFFFFF,
+                        midFill = if (darkBias) 0x7A12141A.toInt() else 0x2EEAF0FA,
+                        bottomFill = if (darkBias) 0x8A181A22.toInt() else 0x44DCE4F4,
+                        topSpecSheen = if (darkBias) 0x36FFFFFF else 0x5CFFFFFF,
+                        rimTop = if (darkBias) 0x8AFFFFFF.toInt() else 0xC6FFFFFF.toInt(),
+                        rimMid = if (darkBias) 0x1EFFFFFF else 0x38FFFFFF,
+                        rimBottom = if (darkBias) 0x5EFFFFFF else 0x8EFFFFFF.toInt(),
+                        outerHaloColor = if (darkBias) 0x44000000 else 0x24000000
                     )
                 } else {
                     IosLiquidGlassDrawable(
                         cornerRadiusPx = radiusPx,
                         strokeWidthPx = strokePx,
-                        topFill = if (darkBias) 0x4A222228.toInt() else 0x38FFFFFF,
-                        midFill = if (darkBias) 0x30141418.toInt() else 0x1AF0F4FF,
-                        bottomFill = if (darkBias) 0x3E1C1C22.toInt() else 0x2CE2E8F6,
-                        topSpecSheen = if (darkBias) 0x28FFFFFF else 0x4CFFFFFF,
-                        rimTop = if (darkBias) 0x6EFFFFFF else 0xAAFFFFFF.toInt(),
-                        rimMid = if (darkBias) 0x20FFFFFF else 0x38FFFFFF,
-                        rimBottom = if (darkBias) 0x48FFFFFF else 0x78FFFFFF
+                        topFill = if (darkBias) 0x621E2028 else 0x3CFFFFFF,
+                        midFill = if (darkBias) 0x44101218 else 0x1CF0F4FF,
+                        bottomFill = if (darkBias) 0x54181A22 else 0x30E2E8F6,
+                        topSpecSheen = if (darkBias) 0x2CFFFFFF else 0x52FFFFFF,
+                        rimTop = if (darkBias) 0x82FFFFFF.toInt() else 0xBAFFFFFF.toInt(),
+                        rimMid = if (darkBias) 0x1AFFFFFF else 0x30FFFFFF,
+                        rimBottom = if (darkBias) 0x54FFFFFF else 0x82FFFFFF.toInt(),
+                        outerHaloColor = if (darkBias) 0x3C000000 else 0x1E000000
                     )
                 }
             }
@@ -293,13 +295,21 @@ class IosLiquidGlassDrawable(
     private val topSpecSheen: Int,
     private val rimTop: Int,
     private val rimMid: Int,
-    private val rimBottom: Int
+    private val rimBottom: Int,
+    private val outerHaloColor: Int = 0x28000000
 ) : Drawable() {
 
     private val rect = RectF()
     private val sheenRect = RectF()
+    private val bottomGlowRect = RectF()
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val bottomGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = strokeWidthPx * 1.4f
+        color = outerHaloColor
+    }
     private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = strokeWidthPx
@@ -307,7 +317,7 @@ class IosLiquidGlassDrawable(
 
     override fun onBoundsChange(bounds: Rect) {
         super.onBoundsChange(bounds)
-        val halfStroke = strokeWidthPx * 0.5f
+        val halfStroke = strokeWidthPx * 0.65f
         rect.set(
             bounds.left + halfStroke,
             bounds.top + halfStroke,
@@ -319,12 +329,18 @@ class IosLiquidGlassDrawable(
             rect.left + strokeWidthPx,
             rect.top + strokeWidthPx,
             rect.right - strokeWidthPx,
-            rect.top + (h * 0.42f)
+            rect.top + (h * 0.40f)
+        )
+        bottomGlowRect.set(
+            rect.left + strokeWidthPx,
+            rect.bottom - (h * 0.22f),
+            rect.right - strokeWidthPx,
+            rect.bottom - strokeWidthPx
         )
         fillPaint.shader = LinearGradient(
             rect.left, rect.top, rect.left, rect.bottom,
             intArrayOf(topFill, midFill, bottomFill),
-            floatArrayOf(0f, 0.52f, 1f),
+            floatArrayOf(0f, 0.50f, 1f),
             Shader.TileMode.CLAMP
         )
         sheenPaint.shader = LinearGradient(
@@ -333,10 +349,18 @@ class IosLiquidGlassDrawable(
             0x00FFFFFF,
             Shader.TileMode.CLAMP
         )
+        val softBottomGlow = ((Color.alpha(topSpecSheen) / 3) shl 24) or 0x00FFFFFF
+        bottomGlowPaint.shader = LinearGradient(
+            bottomGlowRect.left, bottomGlowRect.top, bottomGlowRect.left, bottomGlowRect.bottom,
+            0x00FFFFFF,
+            softBottomGlow,
+            Shader.TileMode.CLAMP
+        )
+        // Authentic iOS 26 diagonal dual-corner liquid refraction rim
         rimPaint.shader = LinearGradient(
-            rect.left, rect.top, rect.right * 0.35f + rect.left * 0.65f, rect.bottom,
-            intArrayOf(rimTop, rimMid, rimBottom),
-            floatArrayOf(0f, 0.48f, 1f),
+            rect.left, rect.top, rect.right, rect.bottom,
+            intArrayOf(rimTop, rimMid, rimMid, rimBottom),
+            floatArrayOf(0f, 0.36f, 0.68f, 1f),
             Shader.TileMode.CLAMP
         )
     }
@@ -344,14 +368,18 @@ class IosLiquidGlassDrawable(
     override fun draw(canvas: Canvas) {
         if (rect.width() <= 0f || rect.height() <= 0f) return
         val r = minOf(cornerRadiusPx, rect.height() * 0.5f, rect.width() * 0.5f)
+        canvas.drawRoundRect(rect, r, r, haloPaint)
         canvas.drawRoundRect(rect, r, r, fillPaint)
         canvas.drawRoundRect(sheenRect, r, r, sheenPaint)
+        canvas.drawRoundRect(bottomGlowRect, r, r, bottomGlowPaint)
         canvas.drawRoundRect(rect, r, r, rimPaint)
     }
 
     override fun setAlpha(alpha: Int) {
         fillPaint.alpha = alpha
         sheenPaint.alpha = alpha
+        bottomGlowPaint.alpha = alpha
+        haloPaint.alpha = (alpha * Color.alpha(outerHaloColor)) / 255
         rimPaint.alpha = alpha
         invalidateSelf()
     }
@@ -359,6 +387,7 @@ class IosLiquidGlassDrawable(
     override fun setColorFilter(colorFilter: ColorFilter?) {
         fillPaint.colorFilter = colorFilter
         sheenPaint.colorFilter = colorFilter
+        bottomGlowPaint.colorFilter = colorFilter
         rimPaint.colorFilter = colorFilter
         invalidateSelf()
     }

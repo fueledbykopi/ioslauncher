@@ -82,8 +82,8 @@ class IosHomeGridPage(
             val child = getChildAt(i)
             when (child) {
                 is IosAppIconView -> child.setJiggling(jiggle)
+                is IosWidgetContainerView -> child.setJiggling(jiggle)
                 else -> {
-                    // Subtle jiggle scale cue on widgets
                     child.animate()
                         .scaleX(if (jiggle) 0.96f else 1f)
                         .scaleY(if (jiggle) 0.96f else 1f)

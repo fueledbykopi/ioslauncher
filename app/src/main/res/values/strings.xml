@@ -3,4 +3,6 @@
     <string name="app_name">iOSpring</string>
     <string name="settings_title">iOSpring Settings</string>
     <string name="badge_service_label">iOSpring Notification Badges</string>
+    <string name="screen_lock_service_label">iOSpring Double-Tap Screen Off</string>
+    <string name="screen_lock_service_desc">Allows double-tapping an empty Home Screen spot to turn off the screen instantly with zero background battery usage.</string>
 </resources>

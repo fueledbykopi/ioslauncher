@@ -1,6 +1,7 @@
 package com.iospring.launcher.ui
 
 import android.content.Context
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
@@ -34,11 +35,18 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
     var onSwipeDownSpotlight: ((pullDistancePx: Float, committed: Boolean) -> Unit)? = null
     var onEmptyLongPress: (() -> Unit)? = null
     var onEmptyTap: (() -> Unit)? = null
+    var onEmptyDoubleTap: (() -> Unit)? = null
 
     private val viewConfig = ViewConfiguration.get(context)
     private val touchSlop = viewConfig.scaledTouchSlop
+    private val doubleTapSlop = viewConfig.scaledDoubleTapSlop
+    private val doubleTapTimeoutMs = ViewConfiguration.getDoubleTapTimeout().toLong()
     private val maxFlingVelocity = viewConfig.scaledMaximumFlingVelocity.toFloat()
     private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
+
+    private var lastEmptyTapTimeMs: Long = 0L
+    private var lastEmptyTapX: Float = 0f
+    private var lastEmptyTapY: Float = 0f
 
     private var currentPage: Int = 0
     private var currentScrollX: Float = 0f
@@ -372,7 +380,21 @@ class SpringWorkspacePager(context: Context) : ViewGroup(context) {
                         if (dragInterruptedSpring) {
                             scrollToPage(currentPage, animate = true)
                         } else if (action == MotionEvent.ACTION_UP && wasLongPressPending) {
-                            onEmptyTap?.invoke()
+                            val nowMs = SystemClock.uptimeMillis()
+                            val dt = nowMs - lastEmptyTapTimeMs
+                            val dxTap = abs(downX - lastEmptyTapX)
+                            val dyTap = abs(downY - lastEmptyTapY)
+                            if (lastEmptyTapTimeMs > 0L && dt in 40L..doubleTapTimeoutMs &&
+                                dxTap <= doubleTapSlop && dyTap <= doubleTapSlop
+                            ) {
+                                lastEmptyTapTimeMs = 0L
+                                onEmptyDoubleTap?.invoke()
+                            } else {
+                                lastEmptyTapTimeMs = nowMs
+                                lastEmptyTapX = downX
+                                lastEmptyTapY = downY
+                                onEmptyTap?.invoke()
+                            }
                         }
                     }
                 }

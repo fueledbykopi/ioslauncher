@@ -15,8 +15,11 @@ import com.iospring.launcher.model.AppEntry
 import com.iospring.launcher.model.BuiltInWidgetType
 import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.HomeItem
+import com.iospring.launcher.model.IconSizeMode
+import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.model.LauncherPreferences
 import com.iospring.launcher.model.LauncherWorkspaceState
+import com.iospring.launcher.model.LockClockStyle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -248,8 +251,30 @@ class IospringCoreTest {
         assertTrue(defaults.keepInRamEnabled)
         assertTrue(defaults.autoArrangeIcons)
         assertFalse(defaults.cleanModeEnabled)
+        assertTrue(defaults.doubleTapToLockEnabled)
+        assertFalse(defaults.iosLockScreenEnabled)
+        assertEquals(IconThemeStyle.DARK, defaults.iconThemeStyle)
         assertEquals(GlassThemeStyle.LIQUID_GLASS, defaults.glassThemeStyle)
+        assertEquals(IconSizeMode.LARGE, defaults.iconSizeMode)
+        assertEquals(LockClockStyle.LIQUID_GLASS, defaults.lockScreenClockStyle)
         assertTrue(GlassThemeStyle.entries.contains(GlassThemeStyle.FROSTED_GLASS))
         assertTrue(GlassThemeStyle.entries.contains(GlassThemeStyle.FROSTED_BLUR))
+    }
+
+    @Test
+    fun autoArrangePreservesAndroidWidgetsWhileCompactingApps() {
+        val androidWidget = HomeItem.AndroidWidgetItem(
+            id = "aw1", page = 0, col = 0, row = 0, spanX = 4, spanY = 2,
+            appWidgetId = 42, providerPackage = "com.google.android.deskclock", providerClass = ".ClockWidget"
+        )
+        val appA = HomeItem.AppShortcut("a1", page = 0, col = 3, row = 3, "com.a", ".A", "App A")
+        val state = LauncherWorkspaceState(pagesCount = 1, items = mutableListOf(androidWidget, appA))
+
+        GridOccupancy.compactWorkspace(state, cols = 4, rows = 6)
+
+        assertEquals(0, androidWidget.col)
+        assertEquals(0, androidWidget.row)
+        assertEquals(0, appA.col)
+        assertEquals(2, appA.row)
     }
 }

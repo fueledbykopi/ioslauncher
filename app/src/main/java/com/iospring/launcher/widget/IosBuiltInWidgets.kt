@@ -23,7 +23,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.iospring.launcher.model.BuiltInWidgetType
+import com.iospring.launcher.model.GlassThemeStyle
 import com.iospring.launcher.model.HomeItem
+import com.iospring.launcher.model.IconThemeStyle
 import com.iospring.launcher.ui.IosDesign
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -38,45 +40,37 @@ interface RefreshableIosWidget {
 }
 
 object IosBuiltInWidgetFactory {
-    fun createView(
+    fun createContentView(
         context: Context,
         item: HomeItem.BuiltInWidgetItem,
+        glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS,
+        iconStyle: IconThemeStyle = IconThemeStyle.DARK,
         onEditNote: ((HomeItem.BuiltInWidgetItem) -> Unit)? = null,
-        onOpenCalendar: (() -> Unit)? = null,
-        onOpenClock: (() -> Unit)? = null
+        onOpenCalendar: (() -> Unit)? = null
     ): View {
-        val wrapper = FrameLayout(context)
-        val pad = IosDesign.dpInt(context, 6f)
-        wrapper.setPadding(pad, pad, pad, pad)
-
-        val widgetView: View = when (item.widgetType) {
-            BuiltInWidgetType.CLOCK_2X2 -> IosClockWidgetView(context).apply {
-                setOnLongClickListener {
-                    onOpenClock?.invoke()
-                    true
-                }
-            }
-            BuiltInWidgetType.CALENDAR_2X2 -> IosCalendarWidgetView(context).apply {
+        val isDark = iconStyle != IconThemeStyle.LIGHT || glassStyle == GlassThemeStyle.OBSIDIAN_GLASS
+        return when (item.widgetType) {
+            BuiltInWidgetType.CLOCK_2X2 -> IosClockWidgetView(context, preferDark = isDark, glassStyle = glassStyle)
+            BuiltInWidgetType.CALENDAR_2X2 -> IosCalendarWidgetView(context, isDark = isDark, glassStyle = glassStyle, iconStyle = iconStyle).apply {
                 setOnClickListener { onOpenCalendar?.invoke() }
             }
-            BuiltInWidgetType.BATTERY_2X2 -> IosBatteryWidgetView(context)
-            BuiltInWidgetType.QUICK_STATUS_4X2 -> IosQuickStatusWidgetView(context)
-            BuiltInWidgetType.NOTES_4X2 -> IosNotesWidgetView(context, item.customNote).apply {
+            BuiltInWidgetType.BATTERY_2X2 -> IosBatteryWidgetView(context, glassStyle = glassStyle, iconStyle = iconStyle)
+            BuiltInWidgetType.QUICK_STATUS_4X2 -> IosQuickStatusWidgetView(context, glassStyle = glassStyle, iconStyle = iconStyle)
+            BuiltInWidgetType.NOTES_4X2 -> IosNotesWidgetView(context, item.customNote, isDark = isDark, glassStyle = glassStyle).apply {
                 setOnClickListener { onEditNote?.invoke(item) }
             }
         }
-        wrapper.addView(widgetView, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        ))
-        return wrapper
     }
 }
 
 /**
- * Signature iOS 18 2x2 Clock Widget with tap-to-toggle Analog / Digital display.
+ * Signature iOS 18/26 2x2 Clock Widget with tap-to-toggle Analog / Digital display.
  */
-class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget {
+class IosClockWidgetView(
+    context: Context,
+    private val preferDark: Boolean = true,
+    private val glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
+) : View(context), RefreshableIosWidget {
 
     private var digitalMode: Boolean = false
     private val cardRect = RectF()
@@ -127,11 +121,21 @@ class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget
         calendar.timeInMillis = System.currentTimeMillis()
         val hour24 = calendar.get(Calendar.HOUR_OF_DAY)
         val minute = calendar.get(Calendar.MINUTE)
-        val isNight = hour24 < 6 || hour24 >= 18
+        val isNight = preferDark || hour24 < 6 || hour24 >= 18
 
         cardRect.set(0f, 0f, w, h)
-        bgPaint.color = if (isNight) 0xE61C1C1E.toInt() else 0xEBFFFFFF.toInt()
+        bgPaint.color = when {
+            isNight && glassStyle == GlassThemeStyle.LIQUID_GLASS -> 0xB814151B.toInt()
+            isNight -> 0xDD1A1A1E.toInt()
+            else -> 0xEBFFFFFF.toInt()
+        }
         canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, bgPaint)
+        if (glassStyle == GlassThemeStyle.LIQUID_GLASS || glassStyle == GlassThemeStyle.FROSTED_GLASS) {
+            tickPaint.style = Paint.Style.STROKE
+            tickPaint.color = if (isNight) 0x4AFFFFFF else 0x62FFFFFF
+            tickPaint.strokeWidth = IosDesign.dp(context, 1.1f)
+            canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, tickPaint)
+        }
 
         if (digitalMode) {
             drawDigital(canvas, w, h, calendar, isNight)
@@ -229,25 +233,30 @@ class IosClockWidgetView(context: Context) : View(context), RefreshableIosWidget
 }
 
 /**
- * Authentic iOS 18 2x2 Calendar Widget (22dp corners, red weekday, large clean date).
+ * Authentic iOS 18/26 2x2 Calendar Widget (22dp corners, red weekday, large clean date, Dark & Liquid Glass aware).
  */
-class IosCalendarWidgetView(context: Context) : LinearLayout(context), RefreshableIosWidget {
+class IosCalendarWidgetView(
+    context: Context,
+    isDark: Boolean = true,
+    glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS,
+    iconStyle: IconThemeStyle = IconThemeStyle.DARK
+) : LinearLayout(context), RefreshableIosWidget {
 
     private val weekdayView = TextView(context).apply {
-        setTextColor(IosDesign.IOS_RED)
+        setTextColor(if (isDark) 0xFFFF453A.toInt() else IosDesign.IOS_RED)
         textSize = 12f
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
     }
 
     private val dayNumberView = TextView(context).apply {
-        setTextColor(0xFF1C1C1E.toInt())
+        setTextColor(if (isDark) Color.WHITE else 0xFF1C1C1E.toInt())
         textSize = 36f
-        typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        typeface = IosDesign.TYPEFACE_LIGHT
         includeFontPadding = false
     }
 
     private val monthView = TextView(context).apply {
-        setTextColor(0xFF636366.toInt())
+        setTextColor(if (isDark) 0xFFAEAEB2.toInt() else 0xFF636366.toInt())
         textSize = 12f
         typeface = IosDesign.TYPEFACE_REGULAR
     }
@@ -262,13 +271,17 @@ class IosCalendarWidgetView(context: Context) : LinearLayout(context), Refreshab
         gravity = Gravity.TOP or Gravity.START
         val pad = IosDesign.dpInt(context, 16f)
         setPadding(pad, pad, pad, pad)
-        background = IosDesign.createGlassDrawable(
-            context = context,
-            cornerRadiusDp = 22f,
-            fillColor = 0xF0FFFFFF.toInt(),
-            strokeColor = 0x30FFFFFF,
-            strokeWidthDp = 0.8f
-        )
+        background = if (isDark) {
+            IosDesign.createThemeSurface(context, 22f, glassStyle, iconStyle, strongSurface = true)
+        } else {
+            IosDesign.createGlassDrawable(
+                context = context,
+                cornerRadiusDp = 22f,
+                fillColor = 0xF0FFFFFF.toInt(),
+                strokeColor = 0x44FFFFFF,
+                strokeWidthDp = 0.9f
+            )
+        }
 
         addView(weekdayView)
         addView(dayNumberView, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
@@ -290,9 +303,13 @@ class IosCalendarWidgetView(context: Context) : LinearLayout(context), Refreshab
 }
 
 /**
- * Authentic iOS 18 2x2 Batteries Widget showing Phone battery ring + connected Bluetooth battery ring.
+ * Authentic iOS 18/26 2x2 Batteries Widget showing Phone battery ring + connected Bluetooth battery ring.
  */
-class IosBatteryWidgetView(context: Context) : View(context), RefreshableIosWidget {
+class IosBatteryWidgetView(
+    context: Context,
+    glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS,
+    iconStyle: IconThemeStyle = IconThemeStyle.DARK
+) : View(context), RefreshableIosWidget {
 
     private var phonePct: Int = 100
     private var isCharging: Boolean = false
@@ -329,6 +346,7 @@ class IosBatteryWidgetView(context: Context) : View(context), RefreshableIosWidg
     }
 
     init {
+        background = IosDesign.createThemeSurface(context, 22f, glassStyle, IconThemeStyle.DARK, strongSurface = true)
         refreshWidgetData()
     }
 
@@ -389,9 +407,6 @@ class IosBatteryWidgetView(context: Context) : View(context), RefreshableIosWidg
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        cardRect.set(0f, 0f, w, h)
-        canvas.drawRoundRect(cardRect, cornerRadius, cornerRadius, bgPaint)
-
         val hasBt = btPct != null
         if (!hasBt) {
             val r = minOf(w, h) * 0.30f
@@ -437,14 +452,18 @@ class IosBatteryWidgetView(context: Context) : View(context), RefreshableIosWidg
 }
 
 /**
- * 4x2 Frosted Glass Device Summary Widget (Greeting, Date, Battery & Free RAM).
+ * 4x2 Apple Liquid/Frosted Glass Device Summary Widget (Greeting, Date, Battery & Free RAM).
  */
-class IosQuickStatusWidgetView(context: Context) : LinearLayout(context), RefreshableIosWidget {
+class IosQuickStatusWidgetView(
+    context: Context,
+    glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS,
+    iconStyle: IconThemeStyle = IconThemeStyle.DARK
+) : LinearLayout(context), RefreshableIosWidget {
 
     private val titleTv = TextView(context).apply {
         setTextColor(Color.WHITE)
         textSize = 18f
-        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        typeface = IosDesign.TYPEFACE_MEDIUM_BOLD
     }
     private val dateTv = TextView(context).apply {
         setTextColor(0xCCFFFFFF.toInt())
@@ -466,12 +485,7 @@ class IosQuickStatusWidgetView(context: Context) : LinearLayout(context), Refres
         gravity = Gravity.CENTER_VERTICAL
         val pad = IosDesign.dpInt(context, 18f)
         setPadding(pad, pad, pad, pad)
-        background = IosDesign.createGlassDrawable(
-            context = context,
-            cornerRadiusDp = 22f,
-            fillColor = 0x661C1C1E,
-            strokeColor = 0x38FFFFFF
-        )
+        background = IosDesign.createThemeSurface(context, 22f, glassStyle, iconStyle, strongSurface = true)
         addView(titleTv)
         addView(dateTv, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
             topMargin = IosDesign.dpInt(context, 4f)
@@ -508,12 +522,17 @@ class IosQuickStatusWidgetView(context: Context) : LinearLayout(context), Refres
 }
 
 /**
- * Authentic iOS 18 Quick Note 4x2 Widget (yellow header bar + clean editable note body).
+ * Authentic iOS 18/26 Quick Note 4x2 Widget (yellow Apple Notes header bar + Dark/Light editable body).
  */
-class IosNotesWidgetView(context: Context, initialText: String) : LinearLayout(context), RefreshableIosWidget {
+class IosNotesWidgetView(
+    context: Context,
+    initialText: String,
+    isDark: Boolean = true,
+    glassStyle: GlassThemeStyle = GlassThemeStyle.LIQUID_GLASS
+) : LinearLayout(context), RefreshableIosWidget {
 
     private val bodyTv = TextView(context).apply {
-        setTextColor(0xFF1C1C1E.toInt())
+        setTextColor(if (isDark) 0xF2FFFFFF.toInt() else 0xFF1C1C1E.toInt())
         textSize = 14f
         maxLines = 4
         text = initialText
@@ -521,12 +540,16 @@ class IosNotesWidgetView(context: Context, initialText: String) : LinearLayout(c
 
     init {
         orientation = VERTICAL
-        background = IosDesign.createGlassDrawable(
-            context = context,
-            cornerRadiusDp = 22f,
-            fillColor = 0xF4FFFDF5.toInt(),
-            strokeColor = 0x33000000
-        )
+        background = if (isDark) {
+            IosDesign.createThemeSurface(context, 22f, glassStyle, IconThemeStyle.DARK, strongSurface = true)
+        } else {
+            IosDesign.createGlassDrawable(
+                context = context,
+                cornerRadiusDp = 22f,
+                fillColor = 0xF4FFFDF5.toInt(),
+                strokeColor = 0x33000000
+            )
+        }
         clipToOutline = true
 
         val header = TextView(context).apply {
